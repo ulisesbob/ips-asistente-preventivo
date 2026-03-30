@@ -16,7 +16,7 @@ COPY tsconfig.base.json ./
 
 # Install ALL deps (including devDependencies for build)
 # No --ignore-scripts: bcrypt needs post-install compilation
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=npm-build,target=/root/.npm \
     npm ci
 
 # Copy source code
@@ -44,7 +44,7 @@ COPY packages/db/package.json packages/db/
 COPY apps/api/package.json apps/api/
 
 # Install production deps only (no --ignore-scripts for bcrypt)
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=npm-prod,target=/root/.npm \
     npm ci --omit=dev
 
 # Remove build tools after bcrypt compilation to reduce image size
