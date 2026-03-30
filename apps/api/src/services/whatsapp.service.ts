@@ -89,11 +89,12 @@ export async function sendTextMessage(to: string, text: string): Promise<boolean
   const phoneNumberId = config.WHATSAPP_PHONE_NUMBER_ID;
 
   if (!token || !phoneNumberId) {
-    console.error('[WhatsApp] WHATSAPP_ACCESS_TOKEN o WHATSAPP_PHONE_NUMBER_ID no configurado');
+    console.error('[DEBUG-SEND] FALTA env var — token:', token ? 'SET' : 'UNSET', 'phoneNumberId:', phoneNumberId ? 'SET' : 'UNSET');
     return false;
   }
 
   const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`;
+  console.log(`[DEBUG-SEND] Enviando a ${to}, URL: ${url}, token: ${token.slice(0, 10)}...`);
 
   try {
     const controller = new AbortController();
@@ -119,13 +120,14 @@ export async function sendTextMessage(to: string, text: string): Promise<boolean
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`[WhatsApp] Error enviando mensaje a ${to}: ${response.status} — ${errorBody}`);
+      console.error(`[DEBUG-SEND] ERROR ${response.status} enviando a ${to}: ${errorBody}`);
       return false;
     }
 
+    console.log(`[DEBUG-SEND] Mensaje enviado OK a ${to}`);
     return true;
   } catch (error) {
-    console.error('[WhatsApp] Error de red enviando mensaje:', error);
+    console.error('[DEBUG-SEND] Error de red:', error);
     return false;
   }
 }

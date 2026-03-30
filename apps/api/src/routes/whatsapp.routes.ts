@@ -67,33 +67,46 @@ whatsappRouter.post(
   '/webhooks/whatsapp',
   webhookLimiter,
   (req, res) => {
+    console.log('[DEBUG-WH] POST /webhooks/whatsapp recibido');
+
     // Raw body is required for HMAC verification
     const rawBody: Buffer | undefined = (req as any).rawBody;
     if (!rawBody) {
+      console.error('[DEBUG-WH] rawBody es undefined — express.json verify no se ejecutó');
       res.status(400).json({ status: 'error', message: 'Cuerpo de solicitud inválido' });
       return;
     }
+    console.log('[DEBUG-WH] rawBody presente, longitud:', rawBody.length);
 
     // Verify HMAC-SHA256 signature
     const signature = req.headers['x-hub-signature-256'] as string | undefined;
+    console.log('[DEBUG-WH] Signature header:', signature ? `presente (${signature.slice(0, 20)}...)` : 'AUSENTE');
     if (!verifyWebhookSignature(rawBody, signature ?? '')) {
       console.warn('[WhatsApp] Firma inválida en webhook');
       res.status(401).json({ status: 'error', message: 'Firma inválida' });
       return;
     }
+    console.log('[DEBUG-WH] Firma verificada OK');
 
     // Respond 200 immediately — Meta requirement (must be < 5 seconds)
     res.status(200).json({ status: 'ok' });
 
     // Process messages asynchronously — fire and forget (errors logged, not thrown)
     const messages = parseWebhookPayload(req.body).slice(0, MAX_MESSAGES_PER_WEBHOOK);
+    console.log('[DEBUG-WH] Mensajes parseados:', messages.length, JSON.stringify(messages.map(m => ({ from: m.from, text: m.text.slice(0, 50) }))));
+
+    if (messages.length === 0) {
+      console.log('[DEBUG-WH] 0 mensajes — probablemente status update o event no-text. Body object:', req.body?.object, 'entry count:', req.body?.entry?.length);
+    }
 
     if (messages.length > 0) {
       // Process sequentially per message to preserve order for stateful flows (registration)
       (async () => {
         for (const msg of messages) {
           try {
+            console.log(`[DEBUG-WH] Procesando mensaje de ${msg.from}: "${msg.text.slice(0, 50)}"`);
             await handleIncomingMessage(msg.from, msg.text, msg.displayName);
+            console.log(`[DEBUG-WH] Mensaje de ${msg.from} procesado OK`);
           } catch (error) {
             console.error(`[WhatsApp] Error procesando mensaje de ${msg.from}:`, error);
           }
