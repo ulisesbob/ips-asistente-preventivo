@@ -46,14 +46,24 @@ export default function PacientesPage() {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState(searchParams.get('search') || '');
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
   const [programId, setProgramId] = useState(searchParams.get('programId') || '');
   const [status, setStatus] = useState(searchParams.get('status') || '');
   const [page, setPage] = useState(Number(searchParams.get('page')) || 1);
 
+  // Debounce search input (400ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   const fetchPatients = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
-    if (search) params.set('search', search);
+    if (debouncedSearch) params.set('search', debouncedSearch);
     if (programId) params.set('programId', programId);
     if (status) params.set('status', status);
     params.set('page', String(page));
@@ -67,7 +77,7 @@ export default function PacientesPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, programId, status, page]);
+  }, [debouncedSearch, programId, status, page]);
 
   useEffect(() => {
     apiGet<{ programs: Program[] }>('/api/programs').then((r) => setPrograms(r.programs)).catch(() => {});
@@ -79,13 +89,13 @@ export default function PacientesPage() {
 
   useEffect(() => {
     const params = new URLSearchParams();
-    if (search) params.set('search', search);
+    if (debouncedSearch) params.set('search', debouncedSearch);
     if (programId) params.set('programId', programId);
     if (status) params.set('status', status);
     if (page > 1) params.set('page', String(page));
     const qs = params.toString();
     router.replace(`/pacientes${qs ? `?${qs}` : ''}`, { scroll: false });
-  }, [search, programId, status, page, router]);
+  }, [debouncedSearch, programId, status, page, router]);
 
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();

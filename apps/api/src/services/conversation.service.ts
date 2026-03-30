@@ -106,10 +106,17 @@ export async function handleIncomingMessage(
 
   // 5. If patient found but WA not linked (imported via CSV/panel) → link and go to chat
   if (patient && !patient.whatsappLinked) {
+    // Always link the phone, but respect consent before sending messages
     await prisma.patient.update({
       where: { id: patient.id },
       data: { whatsappLinked: true },
     });
+
+    if (!patient.consent) {
+      // Patient opted out — link silently, don't send messages
+      return;
+    }
+
     const greeting = patient.programs.length > 0
       ? `Hola ${patient.fullName}! Soy el asistente virtual del IPS. ` +
         `Estás inscripto/a en: ${patient.programs.map((pp) => pp.program.name).join(', ')}. ` +
@@ -135,9 +142,8 @@ async function handleRegistration(
   const state = getRegistrationState(phone);
 
   // Step 1: First message ever — ask for name
+  // Set state AFTER send succeeds to avoid broken flow if send fails
   if (!state) {
-    registrationState.set(phone, { step: 'AWAITING_NAME', createdAt: Date.now() });
-
     const greeting =
       'Hola! Soy el asistente virtual del IPS (Instituto de Previsión Social de Misiones). ' +
       'Para poder ayudarte, necesito algunos datos.\n\n' +
@@ -145,6 +151,7 @@ async function handleRegistration(
 
     await saveSystemMessage(e164Phone, null, text, greeting);
     await sendTextMessage(phone, greeting);
+    registrationState.set(phone, { step: 'AWAITING_NAME', createdAt: Date.now() });
     return;
   }
 
@@ -409,12 +416,13 @@ async function linkConversationToPatient(e164Phone: string, patientId: string): 
 }
 
 async function getConversationHistory(conversationId: string): Promise<ChatMessage[]> {
+  // Fetch most recent N messages (desc), then reverse to chronological order
   const messages = await prisma.message.findMany({
     where: {
       conversationId,
       role: { in: [MessageRole.USER, MessageRole.ASSISTANT] },
     },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { createdAt: 'desc' },
     take: MAX_HISTORY_FOR_DB,
     select: {
       role: true,
@@ -422,7 +430,7 @@ async function getConversationHistory(conversationId: string): Promise<ChatMessa
     },
   });
 
-  return messages.map((m) => ({
+  return messages.reverse().map((m) => ({
     role: m.role === MessageRole.USER ? ('user' as const) : ('assistant' as const),
     content: m.content,
   }));

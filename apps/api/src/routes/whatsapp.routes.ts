@@ -40,7 +40,12 @@ whatsappRouter.get(
     const token = req.query['hub.verify_token'] as string | undefined;
     const challenge = req.query['hub.challenge'] as string | undefined;
 
-    const verifyToken = config.WHATSAPP_VERIFY_TOKEN ?? '';
+    const verifyToken = config.WHATSAPP_VERIFY_TOKEN;
+
+    if (!verifyToken) {
+      res.status(403).json({ status: 'error', message: 'WHATSAPP_VERIFY_TOKEN no configurado' });
+      return;
+    }
 
     if (mode === 'subscribe' && token && safeTokenCompare(token, verifyToken)) {
       console.log('[WhatsApp] Webhook verificado exitosamente');

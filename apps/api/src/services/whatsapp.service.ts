@@ -96,6 +96,9 @@ export async function sendTextMessage(to: string, text: string): Promise<boolean
   const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`;
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -109,7 +112,10 @@ export async function sendTextMessage(to: string, text: string): Promise<boolean
         type: 'text',
         text: { body: text },
       }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
       const errorBody = await response.text();

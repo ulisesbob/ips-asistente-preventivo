@@ -23,7 +23,8 @@ const idParamsSchema = z.object({
 });
 
 const createBodySchema = z.object({
-  fullName: z.string().min(2, 'fullName debe tener al menos 2 caracteres').max(200, 'fullName no puede superar 200 caracteres'),
+  fullName: z.string().min(2, 'fullName debe tener al menos 2 caracteres').max(200, 'fullName no puede superar 200 caracteres')
+    .refine((v) => !/^[=+\-@\t\r]/.test(v), 'El nombre no puede comenzar con caracteres especiales (=, +, -, @)'),
   dni: z
     .string()
     .regex(/^\d{7,8}$/, 'DNI debe tener 7 u 8 dígitos numéricos'),

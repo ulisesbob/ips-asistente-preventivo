@@ -115,3 +115,19 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #28 — bcrypt native addon requiere build tools en Alpine
 **Error:** `npm ci --ignore-scripts` en el Dockerfile suprimía la compilación del addon nativo de `bcrypt`. En Alpine (musl libc), los binarios precompilados no existen, así que bcrypt quedaba roto en runtime.
 **Lección:** Si el proyecto usa dependencias con addons nativos (`bcrypt`, `sharp`, `canvas`), NO usar `--ignore-scripts` en el install. Instalar `python3 make g++` en Alpine para la compilación, y limpiar con `apk del` después. Alternativa: migrar a `bcryptjs` (JS puro, sin compilación).
+
+### #29 — orderBy 'asc' con take N retorna los MÁS VIEJOS, no los más recientes
+**Error:** `getConversationHistory` usaba `orderBy: { createdAt: 'asc' }, take: 20`. Esto retorna los primeros 20 mensajes cronológicamente, no los últimos 20. Después de 20+ mensajes, el AI recibía contexto irrelevante (los mensajes más viejos).
+**Lección:** Para obtener los N más recientes: usar `orderBy: 'desc', take: N` y luego `.reverse()`. Nunca asumir que `asc + take` retorna los más recientes — retorna los más viejos.
+
+### #30 — CSV formula injection: fullName con `=`, `+`, `@` ejecuta código en Excel
+**Error:** El campo `fullName` en CSV import y API creation no validaba caracteres iniciales. Un valor como `=CMD('calc')` se almacenaba en la DB y al exportar a Excel ejecutaba código en la máquina del médico.
+**Lección:** Siempre sanitizar campos de texto libre que puedan terminar en una planilla: rechazar o escapar valores que empiecen con `=`, `+`, `-`, `@`, `\t`, `\r`. Aplicar en TODAS las vías de entrada (API + CSV).
+
+### #31 — Setear estado ANTES de enviar mensaje rompe el flujo si el envío falla
+**Error:** En el flujo de registro del bot, `registrationState.set(phone, ...)` se ejecutaba ANTES de `sendTextMessage()`. Si el envío fallaba (error de red), el estado quedaba seteado pero el usuario nunca recibió el mensaje. En su siguiente mensaje, el bot asumía que estaba en el paso siguiente.
+**Lección:** Los side effects de estado deben ejecutarse DESPUÉS de confirmar que la acción que los requiere fue exitosa. Primero enviar, después actualizar estado.
+
+### #32 — Buscar sin debounce genera N requests por cada tecla
+**Error:** La búsqueda de pacientes disparaba `fetchPatients` en cada keystroke sin debounce. Escribir "María García" generaba 13 requests al servidor. La página de conversaciones tenía debounce pero pacientes no.
+**Lección:** Todo input de búsqueda que dispara fetch necesita debounce (300-500ms). Copiar el patrón donde ya funciona. Es un error fácil de introducir y difícil de notar sin monitoreo.

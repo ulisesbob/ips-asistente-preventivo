@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import crypto from 'crypto';
 import { prisma } from '@ips/db';
 import { config } from './config/env';
 import { router } from './routes';
@@ -89,7 +90,9 @@ app.get('/health/cron', (req, res) => {
   const healthToken = process.env.HEALTH_TOKEN;
   const providedToken = req.headers['x-health-token'];
 
-  if (!healthToken || providedToken !== healthToken) {
+  if (!healthToken || typeof providedToken !== 'string' ||
+      healthToken.length !== providedToken.length ||
+      !crypto.timingSafeEqual(Buffer.from(healthToken), Buffer.from(providedToken))) {
     res.status(401).json({ status: 'error', message: 'Unauthorized' });
     return;
   }

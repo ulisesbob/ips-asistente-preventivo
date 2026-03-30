@@ -1,4 +1,4 @@
-import { prisma, Role, PatientProgramStatus } from '@ips/db';
+import { prisma, Role, PatientProgramStatus, ReminderStatus } from '@ips/db';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -72,24 +72,24 @@ export async function getStats(doctorId: string, role: Role): Promise<DashboardS
       where: { ...programFilter, status: PatientProgramStatus.ACTIVE },
     }),
 
-    // remindersSentToday
+    // remindersSentToday — only count SENT, not FAILED
     prisma.reminder.count({
-      where: { ...programFilter, sentAt: { gte: todayStart } },
+      where: { ...programFilter, status: ReminderStatus.SENT, sentAt: { gte: todayStart } },
     }),
 
     // remindersSentWeek
     prisma.reminder.count({
-      where: { ...programFilter, sentAt: { gte: weekAgo } },
+      where: { ...programFilter, status: ReminderStatus.SENT, sentAt: { gte: weekAgo } },
     }),
 
     // remindersSentMonth (also used for response rate denominator)
     prisma.reminder.count({
-      where: { ...programFilter, sentAt: { gte: monthAgo } },
+      where: { ...programFilter, status: ReminderStatus.SENT, sentAt: { gte: monthAgo } },
     }),
 
     // replied reminders last 30 days
     prisma.reminder.count({
-      where: { ...programFilter, sentAt: { gte: monthAgo }, patientReplied: true },
+      where: { ...programFilter, status: ReminderStatus.SENT, sentAt: { gte: monthAgo }, patientReplied: true },
     }),
 
     // patientsByProgram (limit per LESSONS.md #13)

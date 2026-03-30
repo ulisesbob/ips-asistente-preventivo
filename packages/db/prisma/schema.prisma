@@ -155,6 +155,7 @@ model Reminder {
   @@index([patientId])
   @@index([programId])
   @@index([status, scheduledFor])
+  @@index([sentAt])
   @@map("reminders")
 }
 

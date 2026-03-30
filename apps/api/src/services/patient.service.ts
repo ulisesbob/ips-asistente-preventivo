@@ -381,6 +381,8 @@ export async function importPatientsFromCsv(csvContent: string): Promise<ImportR
 
     if (!fullName || fullName.length < 2) {
       errors.push('fullName es requerido (mínimo 2 caracteres)');
+    } else if (/^[=+\-@\t\r]/.test(fullName)) {
+      errors.push('fullName no puede comenzar con =, +, -, @ (prevención de inyección de fórmulas)');
     }
     if (!DNI_REGEX.test(dni)) {
       errors.push('DNI inválido (debe tener 7 u 8 dígitos)');
