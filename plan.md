@@ -59,12 +59,12 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Recalcular nextReminderDate = hoy + frecuencia del programa
 - [x] Log: "Enviados X recordatorios. Y fallidos."
 
-### Paso 8 — Panel web — Pantallas core
-- [ ] Next.js 14 + Tailwind + shadcn/ui en `apps/web/`
-- [ ] Login
-- [ ] Dashboard (pacientes activos, recordatorios enviados, tasa de respuesta)
-- [ ] Pacientes (tabla con búsqueda/filtros/paginación)
-- [ ] Ficha paciente (datos + programas + "marcar control" + recordatorios + conversaciones)
+### Paso 8 — Panel web — Pantallas core ✅
+- [x] Next.js 14 + Tailwind + shadcn/ui en `apps/web/`
+- [x] Login
+- [x] Dashboard (pacientes activos, recordatorios enviados, tasa de respuesta)
+- [x] Pacientes (tabla con búsqueda/filtros/paginación)
+- [x] Ficha paciente (datos + programas + "marcar control" + recordatorios + conversaciones)
 
 ### Paso 9 — Panel web — Pantallas admin
 - [ ] Programas (lista + editar template/centros)

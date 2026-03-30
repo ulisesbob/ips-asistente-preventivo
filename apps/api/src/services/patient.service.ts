@@ -189,7 +189,10 @@ export async function getPatientById(patientId: string, doctorId: string, role: 
         where: programFilter,
         include: {
           program: {
-            select: { id: true, name: true },
+            select: { id: true, name: true, reminderFrequencyDays: true },
+          },
+          enrolledByDoctor: {
+            select: { fullName: true },
           },
         },
         orderBy: { enrolledAt: 'desc' },
@@ -198,15 +201,23 @@ export async function getPatientById(patientId: string, doctorId: string, role: 
         where: programFilter,
         orderBy: { scheduledFor: 'desc' },
         take: 10,
+        include: {
+          program: {
+            select: { name: true },
+          },
+        },
+      },
+      conversations: {
+        orderBy: { startedAt: 'desc' },
+        take: 10,
         select: {
           id: true,
-          programId: true,
-          message: true,
-          scheduledFor: true,
-          sentAt: true,
           status: true,
-          patientReplied: true,
-          createdAt: true,
+          startedAt: true,
+          closedAt: true,
+          _count: {
+            select: { messages: true },
+          },
         },
       },
     },
