@@ -155,3 +155,7 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #38 — Sin WHATSAPP_APP_SECRET la API rechaza todos los mensajes de Meta
 **Error:** El webhook de WhatsApp estaba verificado y Meta enviaba mensajes, pero la API respondía "Firma inválida" porque `WHATSAPP_APP_SECRET` no estaba configurado. En producción (`NODE_ENV=production`), la verificación HMAC-SHA256 es obligatoria.
 **Lección:** Para que el bot de WhatsApp funcione en producción se necesitan 4 variables, no 3: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, y `WHATSAPP_APP_SECRET` (App Secret de Meta → Settings → Basic). Sin el App Secret, todos los mensajes entrantes son rechazados por seguridad.
+
+### #39 — App de WhatsApp en modo test solo envía a números en la lista de permitidos
+**Error:** El bot recibía mensajes correctamente (webhook OK, firma OK, parsing OK, AI generaba respuesta), pero `sendTextMessage` fallaba con error 131030: "Recipient phone number not in allowed list". El código no tenía bugs — la app de Meta estaba en modo desarrollo/test.
+**Lección:** En modo test, Meta Cloud API solo permite enviar mensajes a números explícitamente agregados en Developer Dashboard → WhatsApp → API Setup → "To". Para producción sin restricción, hay que verificar el negocio en Meta Business Manager. Antes de buscar bugs en el código, verificar el estado de la app en Meta.
