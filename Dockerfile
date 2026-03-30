@@ -74,10 +74,7 @@ RUN chown -R ips:ips /app
 # Security: switch to non-root user
 USER ips
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3001}/health || exit 1
-
+# Railway injects PORT dynamically — no HEALTHCHECK needed (Railway manages health)
 EXPOSE 3001
 
 ENTRYPOINT ["dumb-init", "--"]
