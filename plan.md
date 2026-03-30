@@ -27,12 +27,12 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] POST /auth/login, POST /auth/refresh, GET /auth/me
 - [x] Zod validation en todos los endpoints
 
-### Paso 4 — CRUD Pacientes + Deduplicación
-- [ ] GET /patients (búsqueda nombre/DNI, filtros programa/status, paginación)
-- [ ] GET /patients/:id (con programas y recordatorios)
-- [ ] POST /patients (UPSERT por DNI)
-- [ ] PATCH /patients/:id
-- [ ] POST /patients/import (CSV upload + validación + UPSERT masivo)
+### Paso 4 — CRUD Pacientes + Deduplicación ✅
+- [x] GET /patients (búsqueda nombre/DNI, filtros programa/status, paginación)
+- [x] GET /patients/:id (con programas y recordatorios)
+- [x] POST /patients (UPSERT por DNI)
+- [x] PATCH /patients/:id
+- [x] POST /patients/import (CSV upload + validación + UPSERT masivo)
 
 ### Paso 5 — Programas + Inscripciones + Control
 - [ ] GET /programs, GET /programs/:id, PATCH /programs/:id
