@@ -55,3 +55,11 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #13 — Siempre poner límite en queries que retornan listas
 **Error:** `getProgramById` retornaba TODOS los `patientPrograms` de un programa sin `take`. Con 10,000 pacientes inscriptos, el endpoint devolvería toda la tabla de una.
 **Lección:** Toda query con `findMany` o `include` de una relación one-to-many debe tener `take: N` o paginación explícita. Sin límite, un endpoint que funciona en dev explota en producción cuando los datos crecen.
+
+### #14 — No sobreescribir errores de la misma fila en reportes de validación
+**Error:** En `importPatientsFromCsv`, si una fila del CSV tenía DNI duplicado Y teléfono duplicado, se pusheaban dos entradas a `rowErrors` con el mismo `row`. Al construir `errorDetails[fila_N]`, el segundo error sobreescribía al primero. El admin solo veía un error, arreglaba, re-importaba, y recién ahí veía el segundo.
+**Lección:** Cuando se construye un mapa de errores por key (ej: `fila_5`), siempre mergear con los existentes (`push(...re.errors)`) en vez de asignar directamente. Un error perdido = una ronda extra de debugging para el usuario.
+
+### #15 — Recalcular fechas derivadas al cambiar estado
+**Error:** `updatePatientProgramStatus` permitía reactivar un patient-program (PAUSED→ACTIVE) sin recalcular `nextReminderDate`. La fecha quedaba en el pasado, y el cron de recordatorios disparaba un reminder inmediatamente.
+**Lección:** Cuando un cambio de estado afecta campos derivados (como `nextReminderDate` derivado de `lastControlDate + frecuencia`), recalcularlos en la misma operación. No confiar en que los datos calculados previamente siguen siendo válidos después de un cambio de estado.

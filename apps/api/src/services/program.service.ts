@@ -1,4 +1,4 @@
-import { prisma, Role, PatientProgramStatus, Prisma, PrismaClient } from '@ips/db';
+import { prisma, Role, PatientProgramStatus, Prisma } from '@ips/db';
 import { NotFoundError, ForbiddenError, ConflictError } from '../utils/errors';
 
 // ─── Helpers — Prisma error handling ────────────────────────────────────────
@@ -292,11 +292,27 @@ export async function updatePatientProgramStatus(
   doctorId: string,
   role: Role
 ) {
-  await verifyPatientProgramAccess(patientProgramId, doctorId, role);
+  const pp = await verifyPatientProgramAccess(patientProgramId, doctorId, role);
+
+  // When reactivating (PAUSED/COMPLETED → ACTIVE), recalculate nextReminderDate
+  // to avoid firing an overdue reminder immediately
+  let extraData = {};
+  if (status === PatientProgramStatus.ACTIVE && pp.status !== PatientProgramStatus.ACTIVE) {
+    const program = await prisma.program.findUnique({
+      where: { id: pp.programId },
+      select: { reminderFrequencyDays: true },
+    });
+    if (program) {
+      const now = new Date();
+      const nextReminderDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      nextReminderDate.setUTCDate(nextReminderDate.getUTCDate() + program.reminderFrequencyDays);
+      extraData = { nextReminderDate };
+    }
+  }
 
   const updated = await prisma.patientProgram.update({
     where: { id: patientProgramId },
-    data: { status },
+    data: { status, ...extraData },
     include: {
       program: { select: { id: true, name: true } },
       patient: { select: { id: true, fullName: true } },

@@ -422,7 +422,12 @@ export async function importPatientsFromCsv(csvContent: string): Promise<ImportR
   if (rowErrors.length > 0) {
     const errorDetails: Record<string, string[]> = {};
     for (const re of rowErrors) {
-      errorDetails[`fila_${re.row}`] = re.errors;
+      const key = `fila_${re.row}`;
+      if (errorDetails[key]) {
+        errorDetails[key].push(...re.errors);
+      } else {
+        errorDetails[key] = re.errors;
+      }
     }
     throw new ValidationError('El CSV contiene errores. No se importó ningún registro.', errorDetails);
   }
