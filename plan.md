@@ -34,13 +34,13 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] PATCH /patients/:id
 - [x] POST /patients/import (CSV upload + validación + UPSERT masivo)
 
-### Paso 5 — Programas + Inscripciones + Control
-- [ ] GET /programs, GET /programs/:id, PATCH /programs/:id
-- [ ] POST /patients/:id/programs (inscribir a programa)
-- [ ] POST /patient-programs/:id/control (marcar control → recalcular nextReminderDate)
-- [ ] PATCH /patient-programs/:id (cambiar status)
-- [ ] DELETE /patient-programs/:id (dar de baja)
-- [ ] CRUD doctors + doctor_programs (solo admin)
+### Paso 5 — Programas + Inscripciones + Control ✅
+- [x] GET /programs, GET /programs/:id, PATCH /programs/:id
+- [x] POST /patients/:id/programs (inscribir a programa)
+- [x] POST /patient-programs/:id/control (marcar control → recalcular nextReminderDate)
+- [x] PATCH /patient-programs/:id (cambiar status)
+- [x] DELETE /patient-programs/:id (dar de baja)
+- [x] CRUD doctors + doctor_programs (solo admin)
 
 ### Paso 6 — Webhook WhatsApp + Bot
 - [ ] GET /webhooks/whatsapp (verificación Meta)
