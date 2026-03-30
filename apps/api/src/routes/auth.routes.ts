@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
 import { requireAuth } from '../middleware/auth';
@@ -8,6 +9,17 @@ import * as authService from '../services/auth.service';
 import { UnauthorizedError } from '../utils/errors';
 
 const router = Router();
+
+// ─── Rate Limiting ──────────────────────────────────────────────────────────
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 10, // 10 intentos por ventana
+  message: { status: 'error', message: 'Demasiados intentos, intente de nuevo en 15 minutos' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+});
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
 
@@ -28,6 +40,7 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 router.post(
   '/login',
+  authLimiter,
   validate(loginSchema),
   asyncHandler(async (req: Request, res: Response) => {
     const { email, password } = req.body as z.infer<typeof loginSchema>;
@@ -92,6 +105,26 @@ router.get(
       data: { doctor },
     });
   })
+);
+
+// ─── POST /api/auth/logout ──────────────────────────────────────────────────
+
+router.post(
+  '/logout',
+  (_req: Request, res: Response) => {
+    const isProduction = config.NODE_ENV === 'production';
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      path: '/',
+    });
+
+    res.status(200).json({
+      status: 'ok',
+      message: 'Sesión cerrada',
+    });
+  }
 );
 
 export { router as authRouter };
