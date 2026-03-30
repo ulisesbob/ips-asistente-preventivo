@@ -131,3 +131,27 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #32 — Buscar sin debounce genera N requests por cada tecla
 **Error:** La búsqueda de pacientes disparaba `fetchPatients` en cada keystroke sin debounce. Escribir "María García" generaba 13 requests al servidor. La página de conversaciones tenía debounce pero pacientes no.
 **Lección:** Todo input de búsqueda que dispara fetch necesita debounce (300-500ms). Copiar el patrón donde ya funciona. Es un error fácil de introducir y difícil de notar sin monitoreo.
+
+### #33 — Railway BuildKit no soporta --mount=type=cache sin formato específico
+**Error:** El Dockerfile usaba `RUN --mount=type=cache,target=/root/.npm npm ci` y después `--mount=type=cache,id=npm-build,target=/root/.npm`. Railway rechazaba ambos formatos con "Cache mounts MUST be in the format --mount=type=cache,id=<cache-id>" y "Cache mount ID is not prefixed with cache key".
+**Lección:** Railway tiene su propio BuildKit con reglas de cache mounts distintas a Docker estándar. La solución más simple es eliminar cache mounts del Dockerfile y confiar en el cache de capas de Docker (COPY package.json primero, source después). Los cache mounts son una optimización, no una necesidad.
+
+### #34 — Prisma en Alpine necesita openssl instalado explícitamente
+**Error:** El container Docker con node:20-alpine arrancaba y Prisma fallaba con "failed to detect the libssl/openssl version to use" + "Could not parse schema engine response: SyntaxError". Las migraciones no corrían.
+**Lección:** node:20-alpine no incluye openssl. Prisma necesita libssl para conectarse a PostgreSQL. Agregar `apk add --no-cache openssl` en ambos stages del Dockerfile (builder y production).
+
+### #35 — Docker HEALTHCHECK con ${PORT:-3001} no recibe env vars de Railway
+**Error:** Railway inyecta `PORT=8080` pero el HEALTHCHECK del Dockerfile usaba `wget http://localhost:${PORT:-3001}/health`. La shell expansion dentro de HEALTHCHECK CMD no recibe las variables de entorno del runtime, así que siempre usaba 3001. Railway mataba el container porque el health check fallaba.
+**Lección:** En PaaS como Railway/Render que inyectan PORT dinámicamente, NO usar HEALTHCHECK en el Dockerfile. Dejar que la plataforma maneje los health checks externamente. El HEALTHCHECK de Docker es para Docker standalone, no para PaaS.
+
+### #36 — Railway Trial mata containers por inactividad aunque Serverless esté desactivado
+**Error:** La API en Railway arrancaba correctamente (logs mostraban "Server started on port 8080") pero inmediatamente aparecía "Stopping Container". El servicio mostraba "Online" en el dashboard pero devolvía 502 a todos los requests.
+**Lección:** Railway Trial ($5 crédito) tiene limitaciones no documentadas que matan containers independientemente del toggle de Serverless. La solución fue migrar a Render Free que sí mantiene el container vivo (aunque lo duerme después de 15 min de inactividad, al menos responde después de ~50s de wake up).
+
+### #37 — Next.js middleware intercepta /api/* y rompe rewrites de proxy
+**Error:** El middleware de Next.js tenía un matcher que cubría todas las rutas excepto estáticos. Las requests a `/api/auth/login` (que deberían ser proxied al backend via rewrites) eran interceptadas por el middleware y redirigidas a `/login` porque no tenían cookie de sesión.
+**Lección:** En monorepos donde Next.js hace proxy de API calls via `rewrites()`, el middleware DEBE excluir `/api` del matcher: `/((?!api|_next/static|...)*)`. El rewrite es server-side y no tiene cookies del cliente.
+
+### #38 — Sin WHATSAPP_APP_SECRET la API rechaza todos los mensajes de Meta
+**Error:** El webhook de WhatsApp estaba verificado y Meta enviaba mensajes, pero la API respondía "Firma inválida" porque `WHATSAPP_APP_SECRET` no estaba configurado. En producción (`NODE_ENV=production`), la verificación HMAC-SHA256 es obligatoria.
+**Lección:** Para que el bot de WhatsApp funcione en producción se necesitan 4 variables, no 3: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, y `WHATSAPP_APP_SECRET` (App Secret de Meta → Settings → Basic). Sin el App Secret, todos los mensajes entrantes son rechazados por seguridad.
