@@ -66,11 +66,11 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Pacientes (tabla con búsqueda/filtros/paginación)
 - [x] Ficha paciente (datos + programas + "marcar control" + recordatorios + conversaciones)
 
-### Paso 9 — Panel web — Pantallas admin
-- [ ] Programas (lista + editar template/centros)
-- [ ] Médicos (CRUD + asignar a programas)
-- [ ] Importar CSV (drag & drop + preview + validación + confirmación)
-- [ ] Conversaciones (chats del bot con filtros y mensajes paginados)
+### Paso 9 — Panel web — Pantallas admin ✅
+- [x] Programas (lista + editar template/centros)
+- [x] Médicos (CRUD + asignar a programas)
+- [x] Importar CSV (drag & drop + preview + validación + confirmación)
+- [x] Conversaciones (chats del bot con filtros y mensajes paginados)
 
 ### Paso 10 — Deploy + Test end-to-end
 - [ ] Deploy API en Railway

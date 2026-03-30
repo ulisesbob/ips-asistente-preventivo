@@ -10,12 +10,25 @@ import {
   LogOut,
   Activity,
   ChevronRight,
+  Stethoscope,
+  Upload,
+  MessageSquare,
 } from 'lucide-react';
 
-const NAV_ITEMS = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  adminOnly?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/pacientes', label: 'Pacientes', icon: Users },
   { href: '/programas', label: 'Programas', icon: ClipboardList },
+  { href: '/medicos', label: 'Médicos', icon: Stethoscope, adminOnly: true },
+  { href: '/importar', label: 'Importar CSV', icon: Upload, adminOnly: true },
+  { href: '/conversaciones', label: 'Conversaciones', icon: MessageSquare },
 ];
 
 export default function DashboardLayout({
@@ -59,7 +72,7 @@ export default function DashboardLayout({
 
         {/* Navigation */}
         <nav className="flex-1 p-2 space-y-0.5">
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter((item) => !item.adminOnly || doctor.role === 'ADMIN').map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
               <Link

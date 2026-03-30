@@ -1,10 +1,10 @@
 # Estado del Proyecto
 
 ## Estado actual
-- **Último paso completado:** Paso 8 — Panel web — Pantallas core
-- **Paso actual:** Listo para Paso 9 — Panel web — Pantallas admin
+- **Último paso completado:** Paso 9 — Panel web — Pantallas admin
+- **Paso actual:** Listo para Paso 10 — Deploy + Test end-to-end
 - **Bloqueadores:** Ninguno
-- **Próxima acción:** Paso 9 — Programas (editar), Médicos (CRUD), Importar CSV, Conversaciones
+- **Próxima acción:** Paso 10 — Deploy API Railway, Panel Vercel, webhook Meta, templates, seed prod, test E2E
 
 ## Historial
 | Fecha | Paso | Qué se hizo |
@@ -18,3 +18,4 @@
 | 2026-03-30 | 6 | Webhook WhatsApp + Bot: 4 archivos nuevos (whatsapp.service.ts, ai.service.ts, conversation.service.ts, whatsapp.routes.ts) + 3 modificados (env.ts, routes/index.ts, app.ts). GET/POST /webhooks/whatsapp. Flujo registro (nombre→DNI→UPSERT), flujo chat (Claude Haiku), BAJA/ALTA handlers. Security: HMAC-SHA256 con hex validation + timingSafeEqual, production-only enforcement, DNI hijacking prevention, prompt injection defense, rate limiting, registration TTL 30min, message length cap, E.164 phone validation. Code review (3 CRITICAL + 4 HIGH fixed) + security audit (14 findings, all CRITICAL/HIGH resolved) passed. |
 | 2026-03-30 | 7 | Cron de recordatorios: 1 archivo nuevo (reminder.service.ts 195 líneas) + 1 modificado (index.ts). node-cron 8:00 AM Argentina (timezone explícito). Query optimizada con orderBy nextReminderDate ASC + take 500. Interpolación de templates + envío vía Meta Cloud API + registro en reminders (SENT/FAILED) + recálculo nextReminderDate. Security audit (10 findings): concurrency guard (in-process lock), max 5 retries consecutivos antes de PAUSED, inter-message delay 100ms para rate limits Meta, graceful shutdown await de run en curso, validación reminderFrequencyDays > 0, skip si WA no configurado, overflow warning log. Code review + security audit passed. |
 | 2026-03-30 | 8 | Panel web — Pantallas core: 25 archivos en apps/web/ (8 pages, 13 UI components, 3 lib files, 1 middleware) + 2 archivos API nuevos (dashboard.service.ts, dashboard.routes.ts). Next.js 14 + Tailwind + shadcn/ui (DM Sans font). Pages: Login, Dashboard (stats), Pacientes (tabla con búsqueda/filtros/paginación), Ficha paciente (datos + programas + marcar control + recordatorios + conversaciones), Programas (lista). API: GET /api/dashboard (stats con role-based filtering, Promise.all 6 queries, Date.UTC). Auth: JWT refresh automático, middleware route protection, AuthProvider context. react-doctor 100/100. Code review: fixed response shape mismatches (listPatients pagination, getPatientById missing includes: enrolledByDoctor, reminderFrequencyDays, conversations). Build passed. |
+| 2026-03-30 | 9 | Panel web — Pantallas admin: 2 archivos API nuevos (conversation.routes.ts, conversation-panel.service.ts) + 5 páginas frontend (programas edit, médicos CRUD, importar CSV, conversaciones lista, conversaciones detalle) + layout actualizado con nav items admin (role-based). Programas: dialog edición template/centros/frecuencia (admin only) con accesibilidad. Médicos: tabla + crear/editar/gestionar programas (3 dialogs). Importar CSV: drag&drop + preview 10 filas + validación client-side + nota server-side. Conversaciones: lista con búsqueda debounce + filtro status + paginación, detalle chat con bubbles USER/ASSISTANT/SYSTEM + load more. Code review: fixed 3 CRITICAL (where clause collision LESSONS#10, service layer violation, CSV info note) + 2 IMPORTANT (pagination order bug, search debounce). react-doctor 96/100. Build passed. |
