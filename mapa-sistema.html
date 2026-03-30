@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPS - Asistente Preventivo - Mapa del Sistema v2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; padding: 40px; }
+  h1 { text-align: center; font-size: 28px; margin-bottom: 8px; color: #fff; }
+  .subtitle { text-align: center; color: #94a3b8; margin-bottom: 12px; font-size: 14px; }
+  .version { text-align: center; color: #22c55e; margin-bottom: 40px; font-size: 12px; font-weight: 600; letter-spacing: 1px; }
+
+  .section { margin-bottom: 60px; }
+  .section-title { font-size: 20px; font-weight: 700; color: #38bdf8; margin-bottom: 20px; border-left: 4px solid #38bdf8; padding-left: 12px; }
+
+  /* Fixed badge */
+  .fixed { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 4px; background: #22c55e22; color: #22c55e; border: 1px solid #22c55e44; margin-left: 8px; vertical-align: middle; }
+
+  .arch { display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; margin-bottom: 40px; }
+  .arch-box { background: #1e293b; border: 2px solid #334155; border-radius: 16px; padding: 24px; width: 280px; }
+  .arch-box.highlight { border-color: #38bdf8; box-shadow: 0 0 20px rgba(56,189,248,0.15); }
+  .arch-box.green { border-color: #22c55e; box-shadow: 0 0 20px rgba(34,197,94,0.15); }
+  .arch-box.purple { border-color: #a78bfa; box-shadow: 0 0 20px rgba(167,139,250,0.15); }
+  .arch-box.orange { border-color: #fb923c; box-shadow: 0 0 20px rgba(251,146,60,0.15); }
+  .arch-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; margin-bottom: 8px; }
+  .arch-name { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
+  .arch-box.highlight .arch-name { color: #38bdf8; }
+  .arch-box.green .arch-name { color: #22c55e; }
+  .arch-box.purple .arch-name { color: #a78bfa; }
+  .arch-box.orange .arch-name { color: #fb923c; }
+  .arch-list { list-style: none; font-size: 13px; color: #94a3b8; }
+  .arch-list li { padding: 4px 0; padding-left: 16px; position: relative; }
+  .arch-list li::before { content: "→"; position: absolute; left: 0; color: #475569; }
+
+  .flow { display: flex; align-items: stretch; gap: 0; justify-content: center; flex-wrap: wrap; margin: 20px 0; }
+  .flow-step { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px 20px; min-width: 200px; max-width: 260px; position: relative; }
+  .flow-step.bot { border-color: #22c55e; }
+  .flow-step.user { border-color: #38bdf8; }
+  .flow-step.system { border-color: #a78bfa; }
+  .flow-step.doctor { border-color: #fb923c; }
+  .flow-num { position: absolute; top: -10px; left: -10px; width: 24px; height: 24px; border-radius: 50%; background: #38bdf8; color: #0f172a; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .flow-step.bot .flow-num { background: #22c55e; }
+  .flow-step.system .flow-num { background: #a78bfa; }
+  .flow-step.doctor .flow-num { background: #fb923c; }
+  .flow-who { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; margin-bottom: 4px; }
+  .flow-text { font-size: 13px; line-height: 1.5; }
+  .flow-arrow { display: flex; align-items: center; color: #475569; font-size: 24px; padding: 0 8px; }
+
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+  th { background: #1e293b; color: #38bdf8; text-align: left; padding: 10px 14px; border: 1px solid #334155; font-weight: 600; }
+  td { background: #1e293b; padding: 10px 14px; border: 1px solid #334155; color: #cbd5e1; }
+  tr:hover td { background: #263348; }
+
+  .screens { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .screen { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
+  .screen-title { font-weight: 700; color: #f8fafc; margin-bottom: 8px; font-size: 15px; }
+  .screen-desc { font-size: 13px; color: #94a3b8; line-height: 1.6; }
+  .screen-tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-top: 8px; }
+  .tag-admin { background: #fb923c22; color: #fb923c; border: 1px solid #fb923c44; }
+  .tag-both { background: #a78bfa22; color: #a78bfa; border: 1px solid #a78bfa44; }
+
+  .programs { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .program { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; }
+  .program-name { font-weight: 700; color: #f8fafc; margin-bottom: 6px; }
+  .program-freq { font-size: 12px; color: #22c55e; margin-bottom: 6px; }
+  .program-msg { font-size: 12px; color: #94a3b8; font-style: italic; background: #0f172a; padding: 8px 12px; border-radius: 6px; margin-top: 8px; line-height: 1.5; }
+
+  .tech { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .tech-item { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 12px 20px; text-align: center; min-width: 140px; }
+  .tech-name { font-weight: 700; font-size: 14px; color: #f8fafc; }
+  .tech-role { font-size: 11px; color: #64748b; margin-top: 4px; }
+  .tech-removed { background: #1e293b; border: 1px solid #ef444444; border-radius: 10px; padding: 12px 20px; text-align: center; min-width: 140px; opacity: 0.4; text-decoration: line-through; }
+
+  .divider { border: none; border-top: 1px solid #1e293b; margin: 40px 0; }
+
+  /* Rule callout */
+  .rule { background: #22c55e11; border: 1px solid #22c55e33; border-radius: 10px; padding: 16px 20px; margin: 20px 0; }
+  .rule-title { font-weight: 700; color: #22c55e; font-size: 14px; margin-bottom: 8px; }
+  .rule-text { font-size: 13px; color: #94a3b8; line-height: 1.6; }
+  .rule-text code { background: #0f172a; padding: 2px 6px; border-radius: 4px; color: #38bdf8; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>IPS — Asistente Preventivo para Pacientes Crónicos</h1>
+<p class="subtitle">Mapa completo del sistema: Panel de Médicos + Bot WhatsApp + Recordatorios Programados</p>
+<p class="version">V2 — CORREGIDO (duplicados, messages, Redis, programas, doctor_programs)</p>
+
+<!-- ============ ARQUITECTURA ============ -->
+<div class="section">
+  <div class="section-title">1. Arquitectura General <span class="fixed">SIMPLIFICADA</span></div>
+
+  <div class="arch">
+    <div class="arch-box orange">
+      <div class="arch-label">Frontend</div>
+      <div class="arch-name">Panel Médicos</div>
+      <ul class="arch-list">
+        <li>Next.js 14 (App Router)</li>
+        <li>Tailwind + shadcn/ui</li>
+        <li>Login médicos + admin</li>
+        <li>CRUD pacientes</li>
+        <li>Importar CSV/Excel</li>
+        <li>Ver conversaciones bot</li>
+        <li>Deploy: Vercel</li>
+      </ul>
+    </div>
+
+    <div class="arch-box highlight">
+      <div class="arch-label">Backend</div>
+      <div class="arch-name">API + Bot + Cron</div>
+      <ul class="arch-list">
+        <li>Express.js (API REST)</li>
+        <li>Webhook WhatsApp (Meta)</li>
+        <li>Claude API (asistente AI)</li>
+        <li>node-cron (recordatorios diarios)</li>
+        <li style="color:#ef4444; text-decoration:line-through;">BullMQ (removido)</li>
+        <li>Deploy: Railway</li>
+      </ul>
+    </div>
+
+    <div class="arch-box green">
+      <div class="arch-label">Base de Datos</div>
+      <div class="arch-name">PostgreSQL</div>
+      <ul class="arch-list">
+        <li>Pacientes (DNI unique key)</li>
+        <li>9 programas oficiales del IPS</li>
+        <li>Inscripciones a programas</li>
+        <li>Controles realizados (fechas)</li>
+        <li>Recordatorios programados</li>
+        <li>Messages (rows individuales)</li>
+        <li>Deploy: Railway</li>
+      </ul>
+    </div>
+
+    <div class="arch-box purple">
+      <div class="arch-label">Servicios Externos</div>
+      <div class="arch-name">Integraciones</div>
+      <ul class="arch-list">
+        <li>Meta Cloud API (WhatsApp)</li>
+        <li>Anthropic API (Claude AI)</li>
+        <li>Templates Meta aprobados</li>
+        <li style="color:#ef4444; text-decoration:line-through;">Redis (removido)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="rule">
+    <div class="rule-title">Cambio v2: Sin Redis ni BullMQ</div>
+    <div class="rule-text">Para el piloto (cientos de pacientes), <code>node-cron</code> es suficiente. El cron se ejecuta 1 vez por mañana, busca pacientes con recordatorio pendiente, y envía los mensajes secuencialmente. Si escala a miles, se agrega BullMQ + Redis después.</div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ REGLA DE DEDUPLICACIÓN ============ -->
+<div class="section">
+  <div class="section-title">2. Regla de Deduplicación <span class="fixed">NUEVO</span></div>
+
+  <div class="rule">
+    <div class="rule-title">DNI es la unique key universal</div>
+    <div class="rule-text">
+      Hay 3 vías de entrada de pacientes: <b>Panel</b> (médico carga manualmente), <b>CSV Import</b> (admin sube archivo), <b>Bot</b> (paciente se registra por WhatsApp).<br><br>
+      Las 3 vías hacen <code>UPSERT por DNI</code>:<br><br>
+      <b>Si el DNI ya existe →</b> solo actualiza los campos faltantes (ej: vincula el teléfono de WhatsApp si no lo tenía)<br>
+      <b>Si el DNI no existe →</b> crea el registro nuevo<br><br>
+      <b>Ejemplo:</b> Admin importa CSV con María García DNI 28456789 (sin teléfono). Después María escribe al bot y da su DNI. El sistema encuentra el registro existente y le vincula el teléfono. No crea duplicado.
+    </div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-step doctor">
+      <div class="flow-num">A</div>
+      <div class="flow-who">Panel (médico)</div>
+      <div class="flow-text">Carga: nombre, DNI, programa<br>Puede no tener teléfono</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step system">
+      <div class="flow-num" style="background:#a78bfa;">⟳</div>
+      <div class="flow-who">UPSERT por DNI</div>
+      <div class="flow-text"><code>INSERT ... ON CONFLICT (dni) DO UPDATE SET</code><br>Solo actualiza campos que estaban vacíos</div>
+    </div>
+    <div class="flow-arrow">←</div>
+    <div class="flow-step user">
+      <div class="flow-num">C</div>
+      <div class="flow-who">Bot (paciente)</div>
+      <div class="flow-text">Da nombre + DNI por WhatsApp<br>El sistema vincula el teléfono</div>
+    </div>
+  </div>
+
+  <div class="flow" style="margin-top: 8px;">
+    <div class="flow-step doctor">
+      <div class="flow-num">B</div>
+      <div class="flow-who">CSV Import (admin)</div>
+      <div class="flow-text">Sube archivo con nombre, DNI, teléfono, programa.<br>Cada fila = UPSERT por DNI</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step system">
+      <div class="flow-num" style="background:#a78bfa;">⟳</div>
+      <div class="flow-who">Mismo UPSERT</div>
+      <div class="flow-text">Si el DNI ya existe, actualiza.<br>Si no existe, crea.<br>Log: "450 nuevos, 50 actualizados"</div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ FLUJO PACIENTE NUEVO ============ -->
+<div class="section">
+  <div class="section-title">3. Flujo: Paciente escribe al bot por primera vez</div>
+
+  <div class="flow">
+    <div class="flow-step user">
+      <div class="flow-num">1</div>
+      <div class="flow-who">Paciente</div>
+      <div class="flow-text">Escribe "Hola" al número de WhatsApp del IPS</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step bot">
+      <div class="flow-num">2</div>
+      <div class="flow-who">Bot</div>
+      <div class="flow-text">"Hola, soy el asistente del IPS. Para poder ayudarte necesito verificar tu identidad. ¿Cuál es tu <b>nombre completo</b>?"</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step user">
+      <div class="flow-num">3</div>
+      <div class="flow-who">Paciente</div>
+      <div class="flow-text">"María García López"</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step bot">
+      <div class="flow-num">4</div>
+      <div class="flow-who">Bot</div>
+      <div class="flow-text">"Gracias María. Ahora necesito tu <b>número de DNI</b>."</div>
+    </div>
+  </div>
+
+  <div class="flow" style="margin-top: 16px;">
+    <div class="flow-step user">
+      <div class="flow-num">5</div>
+      <div class="flow-who">Paciente</div>
+      <div class="flow-text">"28456789"</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step system">
+      <div class="flow-num">6</div>
+      <div class="flow-who">UPSERT por DNI</div>
+      <div class="flow-text">
+        <b>DNI existe en DB:</b> vincula teléfono WA al registro<br>
+        <b>DNI no existe:</b> crea paciente nuevo con consent=true
+      </div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step bot">
+      <div class="flow-num">7</div>
+      <div class="flow-who">Bot</div>
+      <div class="flow-text">"Listo María, ya estás registrada. Estás inscripta en el <b>Programa Mujer Sana</b>. ¿En qué puedo ayudarte?"</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step bot" style="border-color: #f59e0b;">
+      <div class="flow-num" style="background: #f59e0b;">★</div>
+      <div class="flow-who">Modo Chat</div>
+      <div class="flow-text">Bot responde consultas usando AI + info del paciente + programas inscriptos + centros de atención</div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ FLUJO RECORDATORIOS ============ -->
+<div class="section">
+  <div class="section-title">4. Flujo: Recordatorios automáticos</div>
+
+  <div class="flow">
+    <div class="flow-step system">
+      <div class="flow-num">1</div>
+      <div class="flow-who">node-cron (8:00 AM)</div>
+      <div class="flow-text">Cada mañana: ¿qué pacientes tienen recordatorio pendiente para hoy?</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step system">
+      <div class="flow-num">2</div>
+      <div class="flow-who">Query DB</div>
+      <div class="flow-text"><code>WHERE nextReminderDate &lt;= hoy AND status = 'ACTIVE' AND patient.consent = true AND patient.phone IS NOT NULL</code></div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step bot">
+      <div class="flow-num">3</div>
+      <div class="flow-who">Bot envía template</div>
+      <div class="flow-text">"Hola María, desde el IPS le recordamos que es momento de realizar su <b>mamografía + PAP</b>. Tiene cobertura 100%."</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step system">
+      <div class="flow-num">4</div>
+      <div class="flow-who">Sistema</div>
+      <div class="flow-text">Marca recordatorio SENT.<br>Calcula <code>nextReminderDate</code> = hoy + frecuencia del programa.</div>
+    </div>
+  </div>
+
+  <div class="flow" style="margin-top: 16px;">
+    <div class="flow-step user">
+      <div class="flow-num">5</div>
+      <div class="flow-who">Paciente (opcional)</div>
+      <div class="flow-text">Responde: "¿Dónde me hago la mamografía?"</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step bot">
+      <div class="flow-num">6</div>
+      <div class="flow-who">Bot (modo chat)</div>
+      <div class="flow-text">Responde con AI usando info de centros del programa. "Puede realizarse en Hospital Madariaga (Posadas) o SAMIC Oberá."</div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ FLUJO MÉDICO ============ -->
+<div class="section">
+  <div class="section-title">5. Flujo: Médico marca control realizado <span class="fixed">SIMPLIFICADO</span></div>
+
+  <div class="rule">
+    <div class="rule-title">Sin notas de texto libre — solo "marcar control realizado"</div>
+    <div class="rule-text">Se eliminó la tabla <code>medical_notes</code>. El médico no escribe texto libre (eso sería historia clínica de facto). Solo puede marcar que el paciente realizó su control, lo que actualiza la fecha y recalcula el próximo recordatorio automáticamente.</div>
+  </div>
+
+  <div class="flow">
+    <div class="flow-step doctor">
+      <div class="flow-num">1</div>
+      <div class="flow-who">Médico</div>
+      <div class="flow-text">Entra al panel, se logea con email + contraseña</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step doctor">
+      <div class="flow-num">2</div>
+      <div class="flow-who">Panel</div>
+      <div class="flow-text">Ve dashboard: sus programas, pacientes pendientes de control, recordatorios enviados</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step doctor">
+      <div class="flow-num">3</div>
+      <div class="flow-who">Médico</div>
+      <div class="flow-text">Busca "María García" → abre ficha → click <b>"Marcar control realizado"</b> en Programa Mujer Sana</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step system">
+      <div class="flow-num">4</div>
+      <div class="flow-who">Sistema</div>
+      <div class="flow-text"><code>lastControlDate</code> = hoy<br><code>nextReminderDate</code> = hoy + 365 días<br>Sin texto libre, solo la fecha.</div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ FLUJO IMPORT ============ -->
+<div class="section">
+  <div class="section-title">6. Flujo: Importación masiva de pacientes</div>
+
+  <div class="flow">
+    <div class="flow-step doctor">
+      <div class="flow-num">1</div>
+      <div class="flow-who">Admin</div>
+      <div class="flow-text">Sube CSV/Excel: nombre, DNI, teléfono, programa</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step system">
+      <div class="flow-num">2</div>
+      <div class="flow-who">Validación</div>
+      <div class="flow-text">DNIs formato correcto, teléfonos E.164, programas existentes. Preview con errores.</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step doctor">
+      <div class="flow-num">3</div>
+      <div class="flow-who">Admin confirma</div>
+      <div class="flow-text">"450 nuevos, 50 actualizados, 3 con errores."</div>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step system">
+      <div class="flow-num">4</div>
+      <div class="flow-who">UPSERT masivo</div>
+      <div class="flow-text">Cada fila = UPSERT por DNI.<br>Crea inscripciones a programas.<br>Calcula primer <code>nextReminderDate</code>.</div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ PANTALLAS ============ -->
+<div class="section">
+  <div class="section-title">7. Pantallas del Panel</div>
+
+  <div class="screens">
+    <div class="screen">
+      <div class="screen-title">Login</div>
+      <div class="screen-desc">Email + contraseña. JWT (sin Redis, token en memoria del cliente). Redirección según rol.</div>
+      <span class="screen-tag tag-both">Todos</span>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Dashboard</div>
+      <div class="screen-desc">Pacientes activos, recordatorios enviados hoy/semana/mes, tasa de respuesta, próximos recordatorios. Gráfico de recordatorios vs controles realizados.</div>
+      <span class="screen-tag tag-both">Todos</span>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Pacientes</div>
+      <div class="screen-desc">Tabla con búsqueda por nombre/DNI. Filtros: programa, estado, último control. Paginación. Botón "Nuevo paciente" + "Importar CSV".</div>
+      <span class="screen-tag tag-both">Todos</span>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Ficha Paciente</div>
+      <div class="screen-desc">Datos personales. Programas inscriptos con botón "Marcar control realizado" y fechas. Historial de recordatorios enviados. Conversaciones del bot (paginadas).</div>
+      <span class="screen-tag tag-both">Todos</span>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Programas</div>
+      <div class="screen-desc">Los 9 programas oficiales del IPS. Cantidad de inscriptos, frecuencia, template del mensaje, centros de atención. Editable por admin.</div>
+      <span class="screen-tag tag-admin">Solo Admin</span>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Importar</div>
+      <div class="screen-desc">Drag & drop CSV/Excel. Preview de datos con detección de errores y duplicados. Confirmación. Log de importaciones anteriores.</div>
+      <span class="screen-tag tag-admin">Solo Admin</span>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Médicos</div>
+      <div class="screen-desc">CRUD de médicos. Asignar a programas (tabla doctor_programs). Ver actividad.</div>
+      <span class="screen-tag tag-admin">Solo Admin</span>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Conversaciones</div>
+      <div class="screen-desc">Ver chats del bot. Filtrar por paciente o programa. Mensajes individuales desde tabla messages (paginable, buscable).</div>
+      <span class="screen-tag tag-both">Todos</span>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ PROGRAMAS ============ -->
+<div class="section">
+  <div class="section-title">8. Programas de Salud — 9 oficiales del IPS <span class="fixed">CORREGIDO</span></div>
+
+  <div class="rule">
+    <div class="rule-title">Solo programas oficiales del IPS</div>
+    <div class="rule-text">Se removió "Retiro de Medicación" que no es un programa oficial. Si se quiere agregar como servicio adicional, va separado fuera de los programas de salud.</div>
+  </div>
+
+  <div class="programs">
+    <div class="program">
+      <div class="program-name">Diabetes</div>
+      <div class="program-freq">Recordatorio: cada 3 meses</div>
+      <div class="program-msg">"Hola {{nombre}}, desde el IPS le recordamos que es momento de realizar su control de hemoglobina glicosilada. Tiene cobertura 100% en el laboratorio del IPS. Para más información, responda a este mensaje."</div>
+    </div>
+    <div class="program">
+      <div class="program-name">Mujer Sana</div>
+      <div class="program-freq">Recordatorio: cada 12 meses</div>
+      <div class="program-msg">"Hola {{nombre}}, es momento de realizar su mamografía + PAP. La chequera Mujer Sana le cubre estos estudios de forma gratuita. Retírela en Junín 177 o en su delegación."</div>
+    </div>
+    <div class="program">
+      <div class="program-name">Hombre Sano</div>
+      <div class="program-freq">Recordatorio: cada 12 meses</div>
+      <div class="program-msg">"Hola {{nombre}}, es momento de realizar su control de PSA + ecografía. La chequera Hombre Sano le cubre estos estudios. Retírela en su delegación más cercana."</div>
+    </div>
+    <div class="program">
+      <div class="program-name">PREDHICAR (Hipertensión)</div>
+      <div class="program-freq">Recordatorio: cada 1 mes</div>
+      <div class="program-msg">"Hola {{nombre}}, recuerde controlar su presión arterial. Si no tiene tensiómetro, puede acercarse a su delegación o farmacia propia del IPS."</div>
+    </div>
+    <div class="program">
+      <div class="program-name">Osteoporosis</div>
+      <div class="program-freq">Recordatorio: cada 12 meses</div>
+      <div class="program-msg">"Hola {{nombre}}, es momento de realizar su densitometría ósea anual. Centros: Eldorado, Puerto Rico, Oberá, Posadas."</div>
+    </div>
+    <div class="program">
+      <div class="program-name">Oncológico</div>
+      <div class="program-freq">Recordatorio: cada 3/6/12 meses (configurable)</div>
+      <div class="program-msg">"Hola {{nombre}}, le recordamos su control oncológico programado. Tiene cobertura del 100% en prácticas y medicamentos. Consulte con su médico tratante."</div>
+    </div>
+    <div class="program">
+      <div class="program-name">Celíacos</div>
+      <div class="program-freq">Recordatorio: cada 12 meses</div>
+      <div class="program-msg">"Hola {{nombre}}, es momento de su control anual de celiaquía. Recuerde que tiene cobertura de harinas y productos especiales."</div>
+    </div>
+    <div class="program">
+      <div class="program-name">Cáncer de Colon</div>
+      <div class="program-freq">Recordatorio: cada 12 meses</div>
+      <div class="program-msg">"Hola {{nombre}}, le recordamos realizar su screening de sangre oculta en materia fecal. Solicite la orden en su delegación."</div>
+    </div>
+    <div class="program">
+      <div class="program-name">Plan Materno Infantil</div>
+      <div class="program-freq">Recordatorio: según semana de gestación</div>
+      <div class="program-msg">"Hola {{nombre}}, según su calendario prenatal, le corresponde un control esta semana. Tiene cobertura completa de parto y neonatología."</div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ DB SCHEMA ============ -->
+<div class="section">
+  <div class="section-title">9. Base de Datos — Tablas <span class="fixed">CORREGIDO</span></div>
+
+  <table>
+    <tr><th colspan="4" style="background:#0f172a; color: #fb923c; font-size: 15px;">doctors</th></tr>
+    <tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Ejemplo</th></tr>
+    <tr><td>id</td><td>UUID PK</td><td>ID único</td><td>a1b2c3...</td></tr>
+    <tr><td>fullName</td><td>String</td><td>Nombre completo</td><td>Dr. Roberto Fernández</td></tr>
+    <tr><td>email</td><td>String UNIQUE</td><td>Email (login)</td><td>rfernandez@ips.gob.ar</td></tr>
+    <tr><td>passwordHash</td><td>String</td><td>bcrypt hash</td><td>$2b$10$...</td></tr>
+    <tr><td>role</td><td>Enum</td><td>ADMIN o DOCTOR</td><td>DOCTOR</td></tr>
+    <tr><td>createdAt</td><td>DateTime</td><td>Fecha creación</td><td>2026-03-29</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="4" style="background:#0f172a; color: #f59e0b; font-size: 15px;">doctor_programs <span class="fixed">NUEVO — reemplaza UUID[]</span></th></tr>
+    <tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Ejemplo</th></tr>
+    <tr><td>id</td><td>UUID PK</td><td>ID único</td><td>x1y2z3...</td></tr>
+    <tr><td>doctorId</td><td>UUID FK → doctors</td><td>Médico</td><td>a1b2c3...</td></tr>
+    <tr><td>programId</td><td>UUID FK → programs</td><td>Programa asignado</td><td>g7h8i9...</td></tr>
+    <tr><td>assignedAt</td><td>DateTime</td><td>Fecha asignación</td><td>2026-01-15</td></tr>
+    <tr><td colspan="4" style="color:#22c55e; font-size:12px;">UNIQUE(doctorId, programId) — un médico no puede estar 2 veces en el mismo programa</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="4" style="background:#0f172a; color: #22c55e; font-size: 15px;">patients</th></tr>
+    <tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Ejemplo</th></tr>
+    <tr><td>id</td><td>UUID PK</td><td>ID único</td><td>d4e5f6...</td></tr>
+    <tr><td>fullName</td><td>String</td><td>Nombre completo</td><td>María García López</td></tr>
+    <tr><td>dni</td><td>String UNIQUE</td><td>Documento — clave de deduplicación</td><td>28456789</td></tr>
+    <tr><td>phone</td><td>String? UNIQUE</td><td>WhatsApp (E.164), nullable</td><td>+5493764123456</td></tr>
+    <tr><td>birthDate</td><td>Date?</td><td>Fecha nacimiento</td><td>1975-03-15</td></tr>
+    <tr><td>gender</td><td>Enum?</td><td>M / F / OTRO</td><td>F</td></tr>
+    <tr><td>consent</td><td>Boolean</td><td>Aceptó recibir mensajes</td><td>true</td></tr>
+    <tr><td>registeredVia</td><td>Enum</td><td>PANEL / BOT / IMPORT</td><td>BOT</td></tr>
+    <tr><td>whatsappLinked</td><td>Boolean</td><td>Teléfono verificado por bot</td><td>true</td></tr>
+    <tr><td colspan="4" style="color:#22c55e; font-size:12px;">UPSERT por DNI: las 3 vías de entrada (panel, CSV, bot) usan ON CONFLICT (dni) DO UPDATE</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="4" style="background:#0f172a; color: #a78bfa; font-size: 15px;">programs</th></tr>
+    <tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Ejemplo</th></tr>
+    <tr><td>id</td><td>UUID PK</td><td>ID único</td><td>g7h8i9...</td></tr>
+    <tr><td>name</td><td>String UNIQUE</td><td>Nombre del programa</td><td>Mujer Sana</td></tr>
+    <tr><td>description</td><td>Text</td><td>Descripción</td><td>Prevención cáncer mama y útero</td></tr>
+    <tr><td>reminderFrequencyDays</td><td>Int</td><td>Frecuencia en días</td><td>365</td></tr>
+    <tr><td>templateMessage</td><td>Text</td><td>Mensaje template con {{variables}}</td><td>"Hola {{nombre}}..."</td></tr>
+    <tr><td>centers</td><td>JSON</td><td>Centros de atención</td><td>[{city, name, address}]</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="4" style="background:#0f172a; color: #38bdf8; font-size: 15px;">patient_programs</th></tr>
+    <tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Ejemplo</th></tr>
+    <tr><td>id</td><td>UUID PK</td><td>ID único</td><td>j0k1l2...</td></tr>
+    <tr><td>patientId</td><td>UUID FK → patients</td><td>Paciente</td><td>d4e5f6...</td></tr>
+    <tr><td>programId</td><td>UUID FK → programs</td><td>Programa</td><td>g7h8i9...</td></tr>
+    <tr><td>enrolledAt</td><td>DateTime</td><td>Fecha inscripción</td><td>2026-01-15</td></tr>
+    <tr><td>enrolledByDoctorId</td><td>UUID FK → doctors</td><td>Médico que inscribió</td><td>a1b2c3...</td></tr>
+    <tr><td>lastControlDate</td><td>Date?</td><td>Último control</td><td>2026-03-15</td></tr>
+    <tr><td>nextReminderDate</td><td>Date</td><td>Próximo recordatorio</td><td>2026-06-15</td></tr>
+    <tr><td>status</td><td>Enum</td><td>ACTIVE / PAUSED / COMPLETED</td><td>ACTIVE</td></tr>
+    <tr><td colspan="4" style="color:#22c55e; font-size:12px;">UNIQUE(patientId, programId) — un paciente no se inscribe 2 veces al mismo programa</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="4" style="background:#0f172a; color: #ef4444; font-size: 15px;">reminders</th></tr>
+    <tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Ejemplo</th></tr>
+    <tr><td>id</td><td>UUID PK</td><td>ID único</td><td>p6q7r8...</td></tr>
+    <tr><td>patientId</td><td>UUID FK → patients</td><td>Paciente</td><td>d4e5f6...</td></tr>
+    <tr><td>programId</td><td>UUID FK → programs</td><td>Programa</td><td>g7h8i9...</td></tr>
+    <tr><td>message</td><td>Text</td><td>Mensaje enviado</td><td>"Hola María..."</td></tr>
+    <tr><td>scheduledFor</td><td>Date</td><td>Fecha programada</td><td>2026-03-29</td></tr>
+    <tr><td>sentAt</td><td>DateTime?</td><td>Enviado</td><td>2026-03-29 08:05</td></tr>
+    <tr><td>status</td><td>Enum</td><td>PENDING / SENT / FAILED</td><td>SENT</td></tr>
+    <tr><td>patientReplied</td><td>Boolean</td><td>¿Respondió?</td><td>true</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="4" style="background:#0f172a; color: #06b6d4; font-size: 15px;">conversations</th></tr>
+    <tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Ejemplo</th></tr>
+    <tr><td>id</td><td>UUID PK</td><td>ID único</td><td>s9t0u1...</td></tr>
+    <tr><td>patientId</td><td>UUID FK? → patients</td><td>Paciente (si verificado)</td><td>d4e5f6...</td></tr>
+    <tr><td>phone</td><td>String</td><td>Teléfono WhatsApp</td><td>+5493764123456</td></tr>
+    <tr><td>status</td><td>Enum</td><td>OPEN / CLOSED</td><td>OPEN</td></tr>
+    <tr><td>startedAt</td><td>DateTime</td><td>Inicio</td><td>2026-03-29 10:00</td></tr>
+    <tr><td>closedAt</td><td>DateTime?</td><td>Cierre</td><td>2026-03-29 10:30</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="4" style="background:#0f172a; color: #06b6d4; font-size: 15px;">messages <span class="fixed">NUEVO — reemplaza JSON[]</span></th></tr>
+    <tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Ejemplo</th></tr>
+    <tr><td>id</td><td>UUID PK</td><td>ID único</td><td>v2w3x4...</td></tr>
+    <tr><td>conversationId</td><td>UUID FK → conversations</td><td>Conversación</td><td>s9t0u1...</td></tr>
+    <tr><td>role</td><td>Enum</td><td>USER / ASSISTANT / SYSTEM</td><td>USER</td></tr>
+    <tr><td>content</td><td>Text</td><td>Contenido del mensaje</td><td>"¿Dónde me hago la mamografía?"</td></tr>
+    <tr><td>createdAt</td><td>DateTime</td><td>Timestamp</td><td>2026-03-29 10:05:23</td></tr>
+    <tr><td colspan="4" style="color:#22c55e; font-size:12px;">INDEX en (conversationId, createdAt) para paginación eficiente. Buscable por content con full-text search.</td></tr>
+  </table>
+</div>
+
+<hr class="divider">
+
+<!-- ============ TECH STACK ============ -->
+<div class="section">
+  <div class="section-title">10. Stack Tecnológico <span class="fixed">SIMPLIFICADO</span></div>
+
+  <div class="tech">
+    <div class="tech-item"><div class="tech-name">Next.js 14</div><div class="tech-role">Panel web (App Router)</div></div>
+    <div class="tech-item"><div class="tech-name">Express.js</div><div class="tech-role">API REST + Webhook</div></div>
+    <div class="tech-item"><div class="tech-name">PostgreSQL</div><div class="tech-role">Base de datos</div></div>
+    <div class="tech-item"><div class="tech-name">Prisma</div><div class="tech-role">ORM</div></div>
+    <div class="tech-item"><div class="tech-name">node-cron</div><div class="tech-role">Scheduler recordatorios</div></div>
+    <div class="tech-item"><div class="tech-name">Claude API</div><div class="tech-role">Asistente AI</div></div>
+    <div class="tech-item"><div class="tech-name">Meta Cloud API</div><div class="tech-role">WhatsApp</div></div>
+    <div class="tech-item"><div class="tech-name">Tailwind CSS</div><div class="tech-role">Estilos</div></div>
+    <div class="tech-item"><div class="tech-name">shadcn/ui</div><div class="tech-role">Componentes UI</div></div>
+    <div class="tech-item"><div class="tech-name">Railway</div><div class="tech-role">Deploy API + DB</div></div>
+    <div class="tech-item"><div class="tech-name">Vercel</div><div class="tech-role">Deploy Panel</div></div>
+  </div>
+
+  <div style="display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 16px;">
+    <div class="tech-removed"><div class="tech-name">Redis</div><div class="tech-role">Removido</div></div>
+    <div class="tech-removed"><div class="tech-name">BullMQ</div><div class="tech-role">Removido</div></div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ SEGURIDAD ============ -->
+<div class="section">
+  <div class="section-title">11. Seguridad y Datos de Salud</div>
+
+  <div class="screens" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));">
+    <div class="screen">
+      <div class="screen-title">Sin historia clínica ni texto libre</div>
+      <div class="screen-desc">Solo: nombre, DNI, teléfono, programa, fechas de control. Sin notas de texto libre, sin diagnósticos, sin resultados. El médico solo marca "control realizado" (una fecha).</div>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Autenticación</div>
+      <div class="screen-desc">JWT sin Redis. Token en memoria del cliente (httpOnly cookie). Contraseñas bcrypt. HTTPS obligatorio.</div>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Consentimiento</div>
+      <div class="screen-desc">Opt-in obligatorio antes de enviar mensajes. Paciente puede escribir "BAJA" para desuscribirse.</div>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Disclaimer</div>
+      <div class="screen-desc">"Esta información es orientativa. Para consultas sobre su caso, comuníquese al 0800-888-0109"</div>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Sin evaluación clínica</div>
+      <div class="screen-desc">El bot NUNCA evalúa síntomas, interpreta datos clínicos, ni decide si alguien necesita atención.</div>
+    </div>
+    <div class="screen">
+      <div class="screen-title">Auditoría</div>
+      <div class="screen-desc">Log de accesos: quién vio qué dato y cuándo. Requerido para acuerdo de confidencialidad.</div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ============ CHANGELOG ============ -->
+<div class="section">
+  <div class="section-title">Changelog v1 → v2</div>
+  <table>
+    <tr><th>#</th><th>Problema</th><th>Fix</th></tr>
+    <tr><td style="color:#ef4444;">3</td><td>3 vías de entrada sin deduplicación</td><td>DNI es UNIQUE key. Las 3 vías hacen UPSERT por DNI. Sección 2 nueva dedicada.</td></tr>
+    <tr><td style="color:#ef4444;">4</td><td>messages como JSON[] en conversations</td><td>Tabla <code>messages</code> separada con rows individuales. INDEX en (conversationId, createdAt).</td></tr>
+    <tr><td style="color:#ef4444;">5</td><td>Redis + BullMQ innecesarios para piloto</td><td>Removidos. Se usa <code>node-cron</code> directo. Se agregan si escala.</td></tr>
+    <tr><td style="color:#ef4444;">6</td><td>"Retiro de Medicación" no es programa oficial</td><td>Removido de los 10 programas. Quedan 9 oficiales del IPS.</td></tr>
+    <tr><td style="color:#ef4444;">7</td><td>programIds como UUID[] en doctors</td><td>Tabla intermedia <code>doctor_programs</code> con UNIQUE(doctorId, programId).</td></tr>
+    <tr><td style="color:#ef4444;">8</td><td>medical_notes contradice "sin historia clínica"</td><td>Eliminada tabla <code>medical_notes</code>. El médico solo puede "marcar control realizado" (fecha). Sin texto libre.</td></tr>
+  </table>
+</div>
+
+</body>
+</html>
