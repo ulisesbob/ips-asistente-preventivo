@@ -82,6 +82,19 @@ export function parseWebhookPayload(body: WebhookPayload): IncomingMessage[] {
   return messages;
 }
 
+// ─── Normalize Argentine Phone Numbers ──────────────────────────────────────
+// WhatsApp webhooks send Argentine mobile numbers as 549XXXXXXXXXX (with 9),
+// but the Cloud API expects 54XXXXXXXXXX (without 9) when sending messages.
+// This is a known Meta inconsistency for Argentina (country code 54).
+
+function normalizePhoneForSend(phone: string): string {
+  // Argentine mobile: 549 + 10 digits → 54 + 10 digits
+  if (phone.startsWith('549') && phone.length === 13) {
+    return '54' + phone.slice(3);
+  }
+  return phone;
+}
+
 // ─── Send Text Message ────────────────────────────────────────────────────────
 
 export async function sendTextMessage(to: string, text: string): Promise<boolean> {
@@ -93,6 +106,7 @@ export async function sendTextMessage(to: string, text: string): Promise<boolean
     return false;
   }
 
+  const normalizedTo = normalizePhoneForSend(to);
   const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`;
 
   try {
@@ -108,7 +122,7 @@ export async function sendTextMessage(to: string, text: string): Promise<boolean
       body: JSON.stringify({
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
-        to,
+        to: normalizedTo,
         type: 'text',
         text: { body: text },
       }),
@@ -119,7 +133,7 @@ export async function sendTextMessage(to: string, text: string): Promise<boolean
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`[WhatsApp] Error enviando mensaje a ${to}: ${response.status} — ${errorBody}`);
+      console.error(`[WhatsApp] Error enviando mensaje a ${normalizedTo}: ${response.status} — ${errorBody}`);
       return false;
     }
 
