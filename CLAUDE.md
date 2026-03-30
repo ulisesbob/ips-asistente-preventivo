@@ -15,6 +15,9 @@ Al completar cada paso del plan.md, ANTES de marcarlo como completado, lanzar co
 ## REGLA #5 — MARCAR PASOS COMPLETADOS EN plan.md
 Al terminar cada paso, marcar TODOS los checkboxes del paso como `[x]` y agregar ✅ al título del paso en `plan.md`. Esto es OBLIGATORIO, no opcional. También actualizar `STATUS.md`.
 
+## REGLA #6 — COMMIT AL TERMINAR CADA PASO
+Después de pasar la verificación y el code review, hacer `git commit` con un mensaje descriptivo. NUNCA dejar trabajo sin commitear. Formato: `feat: Paso N — descripción corta`. Esto es la red de seguridad del proyecto — sin commit, el trabajo no existe.
+
 ## Spec
 `spec.md` es la fuente de verdad del diseño. Leerla antes de cualquier cambio estructural.
 
