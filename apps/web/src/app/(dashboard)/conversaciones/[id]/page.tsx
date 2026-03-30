@@ -88,13 +88,17 @@ export default function ConversacionDetallePage() {
     }
   }, [loading]);
 
-  function handleLoadMore() {
+  async function handleLoadMore() {
     const nextPage = page + 1;
-    setPage(nextPage);
-    fetchMessages(nextPage, true);
+    try {
+      await fetchMessages(nextPage, true);
+      setPage(nextPage);
+    } catch {
+      // Page not incremented — user can retry
+    }
   }
 
-  const hasMorePages = data ? page < data.pagination.pages : false;
+  const hasMorePages = data ? data.pagination.page < data.pagination.pages : false;
 
   if (loading) {
     return (

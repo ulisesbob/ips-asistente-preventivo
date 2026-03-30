@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback } from 'react';
-import { apiPost } from '@/lib/api';
+import { apiPost, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -46,7 +46,9 @@ interface ImportError {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseCSV(text: string): ParsedRow[] {
-  const lines = text.trim().split(/\r?\n/);
+  // Strip UTF-8 BOM (Excel exports include it)
+  const clean = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+  const lines = clean.trim().split(/\r?\n/);
   if (lines.length < 2) return [];
 
   const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
@@ -111,7 +113,8 @@ export default function ImportarPage() {
 
   // ── Access guard ──────────────────────────────────────────────────────────
 
-  if (doctor && doctor.role !== 'ADMIN') {
+  if (!doctor) return null;
+  if (doctor.role !== 'ADMIN') {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <p className="text-sm text-muted-foreground">
@@ -187,8 +190,19 @@ export default function ImportarPage() {
       setResult(res);
       setView('result');
     } catch (err: unknown) {
-      const error = err as ImportError;
-      setApiError(error);
+      if (err instanceof ApiError && err.responseBody && typeof err.responseBody === 'object') {
+        const body = err.responseBody as Record<string, unknown>;
+        setApiError({
+          status: 'error',
+          message: body.message as string || err.message,
+          errors: body.errors as ImportError['errors'],
+        });
+      } else {
+        setApiError({
+          status: 'error',
+          message: err instanceof Error ? err.message : 'Error desconocido',
+        });
+      }
       setView('result');
     } finally {
       setImporting(false);

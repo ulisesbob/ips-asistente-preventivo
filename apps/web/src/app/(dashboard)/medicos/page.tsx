@@ -116,7 +116,8 @@ export default function MedicosPage() {
 
   // ── Guard: only ADMIN ─────────────────────────────────────────────────────
 
-  if (currentDoctor && currentDoctor.role !== 'ADMIN') {
+  if (!currentDoctor) return null;
+  if (currentDoctor.role !== 'ADMIN') {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <ShieldAlert className="w-10 h-10 text-muted-foreground mb-3" />

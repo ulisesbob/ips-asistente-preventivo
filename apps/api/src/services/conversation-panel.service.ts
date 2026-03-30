@@ -128,7 +128,10 @@ export async function getConversationMessages(
   }
 
   // DOCTOR: verify access via patient programs
-  if (role === Role.DOCTOR && conversation.patient) {
+  if (role === Role.DOCTOR) {
+    if (!conversation.patient) {
+      throw new NotFoundError('Conversación no encontrada');
+    }
     const doctorPrograms = await prisma.doctorProgram.findMany({
       where: { doctorId },
       select: { programId: true },

@@ -83,3 +83,23 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #20 — Pantalla en blanco en vez de redirect cuando la sesión expira
 **Error:** El `DashboardLayout` verificaba `if (!doctor) return null` después del loading. Cuando la sesión expiraba y `/api/auth/me` fallaba, el usuario veía una pantalla en blanco porque el layout renderizaba `null` sin redirigir.
 **Lección:** Cuando un componente protegido detecta que no hay sesión, debe redirigir activamente a `/login`, no renderizar nada y esperar que "algo más" se encargue. El middleware de Next.js solo verifica presencia del cookie (no validez), así que la protección real debe estar en el componente.
+
+### #21 — Guard de rol debe chequear null ANTES del role check
+**Error:** `if (doctor && doctor.role !== 'ADMIN')` permite que cuando `doctor` es null (loading), la condición sea false y la página admin renderice completa brevemente. El DOCTOR ve flash de la UI admin antes de que el guard active.
+**Lección:** Siempre separar los guards en dos: (1) `if (!doctor) return null` para el estado de carga, (2) `if (doctor.role !== 'ADMIN') return <NoAuth/>` para el check de rol. Nunca combinar ambas condiciones en un solo if.
+
+### #22 — UTF-8 BOM rompe parsing de CSV exportado de Excel
+**Error:** Excel en Windows agrega BOM (byte EF BB BF / char U+FEFF) al exportar CSV UTF-8. `text.trim()` NO lo remueve. El primer header queda como `\uFEFFfullName` → `indexOf('fullname')` retorna -1 → todas las filas aparecen inválidas con "Nombre requerido".
+**Lección:** Siempre strip BOM al inicio del parsing de cualquier archivo de texto: `text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text`. Aplicar a CSV, JSON, y cualquier input de archivos.
+
+### #23 — ApiError.responseBody no se propaga a la UI de errores
+**Error:** `err as ImportError` hace un cast directo, pero `ApiError` guarda el body estructurado en `responseBody`, no como propiedades directas. Los errores detallados por fila (`errors: Record<string, ...>`) nunca se mostraban al usuario.
+**Lección:** Al capturar `ApiError`, extraer `err.responseBody` explícitamente con `instanceof ApiError` check. Nunca castear el error directamente a la interface de respuesta de la API.
+
+### #24 — Conversaciones sin paciente: access bypass para DOCTOR
+**Error:** `if (role === DOCTOR && conversation.patient)` — cuando la conversación no tiene paciente vinculado (patientId null), el check de acceso se skipea y el DOCTOR puede ver mensajes de cualquier conversación sin paciente.
+**Lección:** En checks de acceso role-based, el caso `null` del recurso debe denegar acceso (fail closed), no permitirlo. Siempre: `if (role === DOCTOR) { if (!resource) throw NotFound; /* check access */ }`.
+
+### #25 — Load More basado en estado local vs datos del server
+**Error:** `hasMorePages = page < data.pagination.pages` usaba `page` del estado local que se incrementa ANTES de que el fetch termine. El botón "Cargar más" desaparece antes de que lleguen los datos. Si el fetch falla, el page ya se incrementó y el usuario no puede reintentar.
+**Lección:** Basar condiciones de paginación en `data.pagination.page` (lo que el server confirmó), no en el estado local. Incrementar `page` solo después de un fetch exitoso.
