@@ -1,8 +1,8 @@
 # ─── Stage 1: Build ──────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
-# Build tools for bcrypt native addon
-RUN apk add --no-cache python3 make g++
+# Build tools for bcrypt native addon + openssl for Prisma
+RUN apk add --no-cache openssl python3 make g++
 
 WORKDIR /app
 
@@ -29,7 +29,7 @@ RUN npx prisma generate --schema=packages/db/prisma/schema.prisma && \
 FROM node:20-alpine AS production
 
 # Build tools for bcrypt + dumb-init for PID 1 signal handling
-RUN apk add --no-cache dumb-init python3 make g++ && \
+RUN apk add --no-cache dumb-init openssl python3 make g++ && \
     addgroup -g 1001 -S ips && \
     adduser -S ips -u 1001
 
