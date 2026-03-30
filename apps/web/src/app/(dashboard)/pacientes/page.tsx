@@ -227,6 +227,7 @@ export default function PacientesPage() {
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1}
+                aria-label="Página anterior"
                 className="p-1.5 rounded-md border border-input text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -234,6 +235,7 @@ export default function PacientesPage() {
               <button
                 onClick={() => setPage((p) => Math.min(data.pagination.pages, p + 1))}
                 disabled={page >= data.pagination.pages}
+                aria-label="Página siguiente"
                 className="p-1.5 rounded-md border border-input text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />

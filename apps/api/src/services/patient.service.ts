@@ -201,7 +201,12 @@ export async function getPatientById(patientId: string, doctorId: string, role: 
         where: programFilter,
         orderBy: { scheduledFor: 'desc' },
         take: 10,
-        include: {
+        select: {
+          id: true,
+          scheduledFor: true,
+          sentAt: true,
+          status: true,
+          patientReplied: true,
           program: {
             select: { name: true },
           },

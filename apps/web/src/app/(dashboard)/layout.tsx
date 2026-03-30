@@ -36,6 +36,7 @@ export default function DashboardLayout({
   }
 
   if (!doctor) {
+    router.push('/login');
     return null;
   }
 
@@ -92,6 +93,7 @@ export default function DashboardLayout({
               onClick={logout}
               className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
               title="Cerrar sesión"
+              aria-label="Cerrar sesión"
             >
               <LogOut className="w-4 h-4" />
             </button>

@@ -48,7 +48,6 @@ interface PatientProgram {
 
 interface Reminder {
   id: string;
-  message: string;
   scheduledFor: string;
   sentAt: string | null;
   status: string;
@@ -232,22 +231,22 @@ export default function PatientDetailPage() {
                     </div>
                     <div className="flex gap-2">
                       {pp.status !== 'COMPLETED' && (
-                        <>
-                          <button
-                            onClick={() => handleToggleStatus(pp.id, pp.status)}
-                            disabled={actionLoading === `status-${pp.id}`}
-                            className="text-xs px-2.5 py-1.5 rounded-md border border-input text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 cursor-pointer"
-                          >
-                            {pp.status === 'ACTIVE' ? 'Pausar' : 'Reactivar'}
-                          </button>
-                          <button
-                            onClick={() => handleMarkControl(pp.id)}
-                            disabled={actionLoading === pp.id}
-                            className="text-xs px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
-                          >
-                            {actionLoading === pp.id ? 'Guardando...' : 'Marcar control'}
-                          </button>
-                        </>
+                        <button
+                          onClick={() => handleToggleStatus(pp.id, pp.status)}
+                          disabled={actionLoading === `status-${pp.id}`}
+                          className="text-xs px-2.5 py-1.5 rounded-md border border-input text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 cursor-pointer"
+                        >
+                          {pp.status === 'ACTIVE' ? 'Pausar' : 'Reactivar'}
+                        </button>
+                      )}
+                      {pp.status === 'ACTIVE' && (
+                        <button
+                          onClick={() => handleMarkControl(pp.id)}
+                          disabled={actionLoading === pp.id}
+                          className="text-xs px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+                        >
+                          {actionLoading === pp.id ? 'Guardando...' : 'Marcar control'}
+                        </button>
                       )}
                     </div>
                   </div>

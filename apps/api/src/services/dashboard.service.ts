@@ -92,11 +92,13 @@ export async function getStats(doctorId: string, role: Role): Promise<DashboardS
       where: { ...programFilter, sentAt: { gte: monthAgo }, patientReplied: true },
     }),
 
-    // patientsByProgram
+    // patientsByProgram (limit per LESSONS.md #13)
     prisma.patientProgram.groupBy({
       by: ['programId'],
       where: { ...programFilter, status: PatientProgramStatus.ACTIVE },
       _count: { id: true },
+      orderBy: { programId: 'asc' },
+      take: 20,
     }),
   ]);
 

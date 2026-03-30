@@ -75,9 +75,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
       setAccessToken(data.accessToken);
       setDoctor(data.doctor);
-      router.push('/');
     },
-    [router],
+    [],
   );
 
   const logout = useCallback(async () => {
