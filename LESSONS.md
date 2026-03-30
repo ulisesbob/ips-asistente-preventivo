@@ -39,3 +39,7 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #9 — Usar TODAS las herramientas del prompt
 **Error:** El usuario pasó un prompt con herramientas específicas (agents, MCPs, skills) y no se usaron todas.
 **Lección:** Si el prompt lista herramientas, usarlas TODAS. Cada herramienta está ahí por una razón. Está en CLAUDE.md como REGLA #1.
+
+### #10 — No usar la misma key dos veces en un spread de Prisma where
+**Error:** En `listPatients`, se construyó el filtro con dos spreads que usaban la misma key `programId`: uno con `{ in: doctorProgramIds }` y otro con `{ programId }`. El segundo sobreescribía al primero, permitiendo que un DOCTOR viera pacientes de cualquier programa.
+**Lección:** En JavaScript, cuando dos spreads tienen la misma key, el último gana silenciosamente. Nunca construir filtros de Prisma con keys que puedan colisionar. Resolver la lógica ANTES del objeto (ej: calcular `effectiveProgramIds` primero) y usar una sola key en el where.
