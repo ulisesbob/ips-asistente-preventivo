@@ -67,3 +67,19 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #16 — No mezclar expresión cron UTC con timezone explícito
 **Error:** En el cron de recordatorios se usó `DEFAULT_CRON = '0 11 * * *'` (pensando en 11 UTC = 8 AM Argentina) PERO también se pasó `timezone: 'America/Argentina/Buenos_Aires'` a node-cron. Esto haría que el cron corra a las 11:00 AM hora Argentina, no a las 8:00 AM.
 **Lección:** Cuando node-cron tiene `timezone` configurado, la expresión cron se interpreta EN ese timezone. Si querés 8 AM Argentina, la expresión debe ser `'0 8 * * *'` con timezone Argentina, NO `'0 11 * * *'`. Elegir UNA convención: o expresión en UTC sin timezone, o expresión en hora local con timezone explícito. Nunca mezclar.
+
+### #17 — Definir el contrato API↔Frontend ANTES de codear ambos lados
+**Error:** En Paso 8, el frontend definió interfaces TypeScript (`PatientsResponse`, `PatientDetail`, `Reminder`) asumiendo shapes que no coincidían con lo que la API devolvía. La lista de pacientes esperaba `{ total, page, limit, totalPages }` en el root pero la API devolvía `{ pagination: { page, limit, total, pages } }`. La ficha de paciente esperaba `enrolledByDoctor`, `reminderFrequencyDays`, y `conversations` que la API no incluía. Esto causaba crashes en runtime que TypeScript no detecta (los tipos del frontend son declaraciones de fe, no contratos verificados).
+**Lección:** Cuando el frontend y el backend se crean en el mismo paso, PRIMERO definir el shape exacto de cada response de API (o leer el código del service layer), y DESPUÉS crear las interfaces del frontend copiando esa estructura. Nunca asumir qué devuelve un endpoint — leerlo. Alternativa: usar un tipo compartido en `packages/shared/`.
+
+### #18 — No mostrar acciones inválidas para el estado actual
+**Error:** El botón "Marcar control" se mostraba para programas en estado PAUSED. Marcar un control en un programa pausado no tiene sentido operativo y puede generar datos inconsistentes (el cron podría disparar recordatorios inesperados).
+**Lección:** Las acciones disponibles en la UI deben reflejar las transiciones de estado válidas. Si un programa está PAUSED, solo se puede Reactivar. Si está ACTIVE, se puede Pausar o Marcar control. Si está COMPLETED, no hay acciones. Definir explícitamente la matrix de estado→acciones y validar en ambos lados (UI + API).
+
+### #19 — Intl.DateTimeFormat sin timeZone muestra fechas "un día antes" en Argentina
+**Error:** `formatDate()` usaba `new Intl.DateTimeFormat('es-AR', {...})` sin `timeZone`. Para fechas `@db.Date` que Prisma serializa como `T00:00:00.000Z`, el browser en UTC-3 mostraba el día anterior (31 de marzo se mostraba como 30 de marzo).
+**Lección:** Siempre pasar `timeZone` explícito a `Intl.DateTimeFormat`. Para un sistema argentino: `timeZone: 'America/Argentina/Buenos_Aires'`. Nunca depender del timezone del browser del usuario — puede estar en cualquier zona horaria.
+
+### #20 — Pantalla en blanco en vez de redirect cuando la sesión expira
+**Error:** El `DashboardLayout` verificaba `if (!doctor) return null` después del loading. Cuando la sesión expiraba y `/api/auth/me` fallaba, el usuario veía una pantalla en blanco porque el layout renderizaba `null` sin redirigir.
+**Lección:** Cuando un componente protegido detecta que no hay sesión, debe redirigir activamente a `/login`, no renderizar nada y esperar que "algo más" se encargue. El middleware de Next.js solo verifica presencia del cookie (no validez), así que la protección real debe estar en el componente.
