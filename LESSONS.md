@@ -43,3 +43,15 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #10 — No usar la misma key dos veces en un spread de Prisma where
 **Error:** En `listPatients`, se construyó el filtro con dos spreads que usaban la misma key `programId`: uno con `{ in: doctorProgramIds }` y otro con `{ programId }`. El segundo sobreescribía al primero, permitiendo que un DOCTOR viera pacientes de cualquier programa.
 **Lección:** En JavaScript, cuando dos spreads tienen la misma key, el último gana silenciosamente. Nunca construir filtros de Prisma con keys que puedan colisionar. Resolver la lógica ANTES del objeto (ej: calcular `effectiveProgramIds` primero) y usar una sola key en el where.
+
+### #11 — Usar UTC explícito para fechas que se almacenan como Date (sin hora)
+**Error:** En `markControl` y `enrollPatient`, se usaba `new Date()` con `setHours(0,0,0,0)` que opera en hora local del servidor. Si Railway corre en UTC y Argentina es UTC-3, a las 22:00 AR (01:00 UTC+1 del día siguiente) la fecha guardada sería mañana, no hoy.
+**Lección:** Cuando se almacena un campo `@db.Date` en Prisma (solo fecha, sin hora), construir la fecha con `Date.UTC()` y usar `setUTCDate()` para aritmética. Nunca confiar en `setHours(0,0,0,0)` que depende del timezone del proceso.
+
+### #12 — No contar como "actualizado" lo que no cambió
+**Error:** En `importPatientsFromCsv`, se incrementaba `updatedCount++` para cada paciente existente encontrado, incluso si no se modificó ningún campo (todos ya tenían datos). El reporte decía "50 actualizados" cuando en realidad 0 rows cambiaron.
+**Lección:** Antes de llamar a `update`, verificar que hay campos realmente diferentes. Si el objeto de updates está vacío, no ejecutar el update y no contarlo. Reportes precisos previenen confusión del operador.
+
+### #13 — Siempre poner límite en queries que retornan listas
+**Error:** `getProgramById` retornaba TODOS los `patientPrograms` de un programa sin `take`. Con 10,000 pacientes inscriptos, el endpoint devolvería toda la tabla de una.
+**Lección:** Toda query con `findMany` o `include` de una relación one-to-many debe tener `take: N` o paginación explícita. Sin límite, un endpoint que funciona en dev explota en producción cuando los datos crecen.

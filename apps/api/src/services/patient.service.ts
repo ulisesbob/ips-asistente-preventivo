@@ -439,17 +439,18 @@ export async function importPatientsFromCsv(csvContent: string): Promise<ImportR
       });
 
       if (existing) {
-        await tx.patient.update({
-          where: { dni: data.dni },
-          data: {
-            ...(data.phone && !existing.phone ? { phone: data.phone } : {}),
-            ...(data.birthDate && !existing.birthDate
-              ? { birthDate: parseDateOrUndefined(data.birthDate) }
-              : {}),
-            ...(data.gender && !existing.gender ? { gender: data.gender } : {}),
-          },
-        });
-        updatedCount++;
+        const updates: Record<string, unknown> = {};
+        if (data.phone && !existing.phone) updates.phone = data.phone;
+        if (data.birthDate && !existing.birthDate) updates.birthDate = parseDateOrUndefined(data.birthDate);
+        if (data.gender && !existing.gender) updates.gender = data.gender;
+
+        if (Object.keys(updates).length > 0) {
+          await tx.patient.update({
+            where: { dni: data.dni },
+            data: updates,
+          });
+          updatedCount++;
+        }
       } else {
         await tx.patient.create({
           data: {

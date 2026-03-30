@@ -24,6 +24,7 @@ const SALT_ROUNDS = 10;
 export async function listDoctors() {
   const doctors = await prisma.doctor.findMany({
     orderBy: { fullName: 'asc' },
+    take: 100,
     select: {
       id: true,
       fullName: true,

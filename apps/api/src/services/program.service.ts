@@ -109,6 +109,7 @@ export async function getProgramById(
     include: {
       patientPrograms: {
         orderBy: { enrolledAt: 'desc' },
+        take: 50,
         select: {
           id: true,
           enrolledAt: true,
@@ -210,9 +211,10 @@ export async function enrollPatient(
     }
   }
 
-  // Calculate nextReminderDate = today + frequency
-  const nextReminderDate = new Date();
-  nextReminderDate.setDate(nextReminderDate.getDate() + program.reminderFrequencyDays);
+  // Calculate nextReminderDate = today + frequency (UTC to avoid timezone drift)
+  const now = new Date();
+  const nextReminderDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  nextReminderDate.setUTCDate(nextReminderDate.getUTCDate() + program.reminderFrequencyDays);
 
   try {
     const enrollment = await prisma.patientProgram.create({
@@ -260,11 +262,12 @@ export async function markControl(
     throw new NotFoundError('Programa no encontrado');
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Use UTC to avoid timezone drift (Railway default is UTC, Argentina is UTC-3)
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
   const nextReminderDate = new Date(today);
-  nextReminderDate.setDate(nextReminderDate.getDate() + program.reminderFrequencyDays);
+  nextReminderDate.setUTCDate(nextReminderDate.getUTCDate() + program.reminderFrequencyDays);
 
   const updated = await prisma.patientProgram.update({
     where: { id: patientProgramId },
