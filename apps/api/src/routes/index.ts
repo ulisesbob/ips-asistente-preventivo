@@ -3,6 +3,7 @@ import { authRouter } from './auth.routes';
 import { patientRouter } from './patient.routes';
 import { programRouter, patientProgramRouter } from './program.routes';
 import { doctorRouter } from './doctor.routes';
+import { whatsappRouter } from './whatsapp.routes';
 
 const router = Router();
 
@@ -12,5 +13,7 @@ router.use('/api/programs', programRouter);
 router.use('/api/doctors', doctorRouter);
 // Patient-program routes mounted at /api (paths include /patients/:patientId/programs and /patient-programs/:id)
 router.use('/api', patientProgramRouter);
+// WhatsApp webhook (no auth — Meta calls this directly)
+router.use('/api', whatsappRouter);
 
 export { router };

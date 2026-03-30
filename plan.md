@@ -42,14 +42,14 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] DELETE /patient-programs/:id (dar de baja)
 - [x] CRUD doctors + doctor_programs (solo admin)
 
-### Paso 6 — Webhook WhatsApp + Bot
-- [ ] GET /webhooks/whatsapp (verificación Meta)
-- [ ] POST /webhooks/whatsapp (recibir mensajes)
-- [ ] Flujo registro: pedir nombre → pedir DNI → UPSERT → vincular teléfono
-- [ ] Flujo chat: buscar paciente por teléfono → modo AI con Claude
-- [ ] System prompt: datos paciente + programas + centros + disclaimer
-- [ ] "BAJA" → consent = false
-- [ ] Tabla conversations + messages (rows individuales)
+### Paso 6 — Webhook WhatsApp + Bot ✅
+- [x] GET /webhooks/whatsapp (verificación Meta)
+- [x] POST /webhooks/whatsapp (recibir mensajes)
+- [x] Flujo registro: pedir nombre → pedir DNI → UPSERT → vincular teléfono
+- [x] Flujo chat: buscar paciente por teléfono → modo AI con Claude
+- [x] System prompt: datos paciente + programas + centros + disclaimer
+- [x] "BAJA" → consent = false
+- [x] Tabla conversations + messages (rows individuales)
 
 ### Paso 7 — Cron de recordatorios
 - [ ] node-cron todos los días 8:00 AM (UTC-3)

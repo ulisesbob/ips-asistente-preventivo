@@ -12,12 +12,16 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
-  // Optional — WhatsApp / Anthropic / Cron
-  WHATSAPP_API_URL: z.string().url().optional(),
-  WHATSAPP_API_TOKEN: z.string().optional(),
+  // Optional — WhatsApp (Meta Cloud API)
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+  WHATSAPP_APP_SECRET: z.string().optional(),
+
+  // Optional — AI (Anthropic)
   ANTHROPIC_API_KEY: z.string().optional(),
+
+  // Optional — Cron
   REMINDER_CRON: z.string().optional(),
 });
 
