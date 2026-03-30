@@ -19,13 +19,13 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Correr primera migración
 - [x] Seed: 9 programas oficiales del IPS + 1 admin de prueba
 
-### Paso 3 — API Express base + Auth
-- [ ] Express + TypeScript en `apps/api/`
-- [ ] Middleware: CORS, helmet, JSON parser
-- [ ] Auth: login, JWT (access 15min + refresh 7d), bcrypt
-- [ ] Middleware `requireAuth` y `requireAdmin`
-- [ ] POST /auth/login, POST /auth/refresh, GET /auth/me
-- [ ] Zod validation en todos los endpoints
+### Paso 3 — API Express base + Auth ✅
+- [x] Express + TypeScript en `apps/api/`
+- [x] Middleware: CORS, helmet, JSON parser
+- [x] Auth: login, JWT (access 15min + refresh 7d), bcrypt
+- [x] Middleware `requireAuth` y `requireAdmin`
+- [x] POST /auth/login, POST /auth/refresh, GET /auth/me
+- [x] Zod validation en todos los endpoints
 
 ### Paso 4 — CRUD Pacientes + Deduplicación
 - [ ] GET /patients (búsqueda nombre/DNI, filtros programa/status, paginación)
