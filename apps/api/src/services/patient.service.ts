@@ -70,6 +70,20 @@ export async function listPatients(
     doctorProgramIds = doctorPrograms.map((dp) => dp.programId);
   }
 
+  // For DOCTOR: if programId filter is provided, it must be one of their programs
+  let effectiveProgramIds: string[] | undefined;
+  if (doctorProgramIds !== undefined) {
+    if (programId) {
+      // DOCTOR filtering by a specific program — must be one they're assigned to
+      effectiveProgramIds = doctorProgramIds.includes(programId) ? [programId] : [];
+    } else {
+      effectiveProgramIds = doctorProgramIds;
+    }
+  } else if (programId) {
+    // ADMIN filtering by a specific program
+    effectiveProgramIds = [programId];
+  }
+
   // Build the where clause
   const where: Prisma.PatientWhereInput = {
     ...(search
@@ -80,15 +94,14 @@ export async function listPatients(
           ],
         }
       : {}),
-    // Patient must have at least one PatientProgram matching the role/program/status constraints
-    ...(doctorProgramIds !== undefined || programId || status
+    // Patient must have at least one PatientProgram matching the constraints
+    ...(effectiveProgramIds !== undefined || status
       ? {
           programs: {
             some: {
-              ...(doctorProgramIds !== undefined
-                ? { programId: { in: doctorProgramIds } }
+              ...(effectiveProgramIds !== undefined
+                ? { programId: { in: effectiveProgramIds } }
                 : {}),
-              ...(programId ? { programId } : {}),
               ...(status ? { status } : {}),
             },
           },
