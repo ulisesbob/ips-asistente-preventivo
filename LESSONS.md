@@ -159,3 +159,7 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #39 — App de WhatsApp en modo test solo envía a números en la lista de permitidos
 **Error:** El bot recibía mensajes correctamente (webhook OK, firma OK, parsing OK, AI generaba respuesta), pero `sendTextMessage` fallaba con error 131030: "Recipient phone number not in allowed list". El código no tenía bugs — la app de Meta estaba en modo desarrollo/test.
 **Lección:** En modo test, Meta Cloud API solo permite enviar mensajes a números explícitamente agregados en Developer Dashboard → WhatsApp → API Setup → "To". Para producción sin restricción, hay que verificar el negocio en Meta Business Manager. Antes de buscar bugs en el código, verificar el estado de la app en Meta.
+
+### #40 — Números argentinos: Meta envía 549X pero espera 54X al enviar
+**Error:** El webhook de WhatsApp enviaba `from: "5493764125878"` (con 9 después de 54). El bot respondía al mismo número, pero Meta rechazaba con error 131030 "not in allowed list". El número estaba en la lista, pero como `543764125878` (sin 9).
+**Lección:** Meta Cloud API tiene una inconsistencia con números argentinos: los webhooks envían el formato móvil con 9 (`549XXXXXXXXXX`), pero la API de envío espera el formato sin 9 (`54XXXXXXXXXX`). Siempre normalizar: si empieza con `549` y tiene 13 dígitos, quitar el `9` antes de enviar. Esto aplica solo a Argentina (código 54).
