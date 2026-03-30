@@ -14,7 +14,9 @@
     "db:generate": "npm run db:generate -w @ips/db",
     "db:migrate": "npm run db:migrate -w @ips/db",
     "db:seed": "npm run db:seed -w @ips/db",
-    "db:studio": "npm run db:studio -w @ips/db"
+    "db:studio": "npm run db:studio -w @ips/db",
+    "db:migrate:deploy": "npx prisma migrate deploy --schema=packages/db/prisma/schema.prisma",
+    "db:seed:prod": "npx tsx packages/db/src/seed-prod.ts"
   },
   "engines": {
     "node": ">=20.0.0"

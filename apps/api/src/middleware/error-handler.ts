@@ -2,6 +2,7 @@ import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { Prisma } from '@ips/db';
 import { AppError } from '../utils/errors';
 import { config } from '../config/env';
+import { logger } from '../utils/logger';
 
 // ─── Async Handler Wrapper ─────────────────────────────────────────────────
 
@@ -76,7 +77,11 @@ export function errorHandler(
   const message = isDev && err instanceof Error ? err.message : 'Error interno del servidor';
 
   if (config.NODE_ENV !== 'test') {
-    console.error('[Unhandled Error]', err);
+    logger.error('Unhandled error', {
+      event: 'unhandled_error',
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
   }
 
   res.status(500).json({

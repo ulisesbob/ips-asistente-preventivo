@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { prisma, PatientProgramStatus, ReminderStatus } from '@ips/db';
 import { config } from '../config/env';
 import { sendTextMessage } from './whatsapp.service';
+import { logger } from '../utils/logger';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -16,6 +17,28 @@ const MAX_CONSECUTIVE_FAILURES = 5;
 
 // Delay between WhatsApp API calls to respect Meta rate limits (ms)
 const INTER_MESSAGE_DELAY_MS = 100;
+
+// ─── Cron Status (for /health/cron endpoint) ───────────────────────────────
+
+export interface CronStatus {
+  lastRun: string | null;
+  status: 'success' | 'failed' | 'never_run';
+  sent: number;
+  failed: number;
+  durationMs: number;
+}
+
+let lastCronStatus: CronStatus = {
+  lastRun: null,
+  status: 'never_run',
+  sent: 0,
+  failed: 0,
+  durationMs: 0,
+};
+
+export function getCronStatus(): CronStatus {
+  return { ...lastCronStatus };
+}
 
 // ─── Concurrency Guard ──────────────────────────────────────────────────────
 
@@ -42,7 +65,7 @@ function delay(ms: number): Promise<void> {
 export async function processDueReminders(): Promise<{ sent: number; failed: number }> {
   // Concurrency guard: prevent overlapping runs (Finding 1)
   if (isRunning) {
-    console.warn('[Cron] Ya hay una ejecución en curso — omitiendo');
+    logger.cron('skipped', { reason: 'already_running' });
     return { sent: 0, failed: 0 };
   }
 
@@ -93,16 +116,19 @@ async function _processDueReminders(): Promise<{ sent: number; failed: number }>
   });
 
   if (dueEnrollments.length === 0) {
-    console.log('[Cron] No hay recordatorios pendientes para hoy.');
+    logger.cron('no_reminders_due');
     return { sent: 0, failed: 0 };
   }
 
   // Warn if we hit the limit — there may be more pending (Finding 9)
   if (dueEnrollments.length === MAX_REMINDERS_PER_RUN) {
-    console.warn(`[Cron] ATENCION: Se alcanzó el límite de ${MAX_REMINDERS_PER_RUN} recordatorios. Puede haber más pendientes.`);
+    logger.warn('Cron hit reminder limit — may have more pending', {
+      event: 'cron',
+      limit: MAX_REMINDERS_PER_RUN,
+    });
   }
 
-  console.log(`[Cron] Procesando ${dueEnrollments.length} recordatorios...`);
+  logger.cron('processing', { count: dueEnrollments.length });
 
   let sent = 0;
   let failed = 0;
@@ -112,7 +138,12 @@ async function _processDueReminders(): Promise<{ sent: number; failed: number }>
 
     // Skip programs with invalid frequency to prevent infinite loop (Finding 8)
     if (program.reminderFrequencyDays < 1) {
-      console.error(`[Cron] Programa ${program.id} (${program.name}) tiene frecuencia inválida: ${program.reminderFrequencyDays} — omitiendo`);
+      logger.error('Invalid reminder frequency — skipping', {
+        event: 'cron',
+        programId: program.id,
+        programName: program.name,
+        frequency: program.reminderFrequencyDays,
+      });
       continue;
     }
 
@@ -172,7 +203,13 @@ async function _processDueReminders(): Promise<{ sent: number; failed: number }>
           where: { id: enrollment.id },
           data: { status: PatientProgramStatus.PAUSED },
         });
-        console.warn(`[Cron] Inscripción ${enrollment.id} pausada por ${recentFailures} fallos consecutivos (paciente ${patient.id}, programa ${program.name})`);
+        logger.warn('Enrollment paused due to consecutive failures', {
+          event: 'cron',
+          enrollmentId: enrollment.id,
+          patientId: patient.id,
+          programName: program.name,
+          consecutiveFailures: recentFailures,
+        });
       }
 
       failed++;
@@ -184,7 +221,6 @@ async function _processDueReminders(): Promise<{ sent: number; failed: number }>
     }
   }
 
-  console.log(`[Cron] Enviados ${sent} recordatorios. ${failed} fallidos.`);
   return { sent, failed };
 }
 
@@ -195,14 +231,14 @@ let cronTask: cron.ScheduledTask | null = null;
 export function startReminderCron(): void {
   // Skip if WhatsApp credentials are not configured
   if (!config.WHATSAPP_ACCESS_TOKEN || !config.WHATSAPP_PHONE_NUMBER_ID) {
-    console.warn('[Cron] WhatsApp no configurado — cron de recordatorios deshabilitado');
+    logger.warn('WhatsApp not configured — reminder cron disabled', { event: 'cron' });
     return;
   }
 
   const schedule = config.REMINDER_CRON ?? DEFAULT_CRON;
 
   if (!cron.validate(schedule)) {
-    console.error(`[Cron] Expresión cron inválida: "${schedule}" — usando default`);
+    logger.error(`Invalid cron expression: "${schedule}" — using default`, { event: 'cron' });
     return startReminderCronWithSchedule(DEFAULT_CRON);
   }
 
@@ -211,19 +247,49 @@ export function startReminderCron(): void {
 
 function startReminderCronWithSchedule(schedule: string): void {
   cronTask = cron.schedule(schedule, async () => {
-    console.log(`[Cron] Ejecutando cron de recordatorios — ${new Date().toISOString()}`);
+    const start = Date.now();
+    logger.cron('started');
+
     try {
       runningPromise = processDueReminders();
-      await runningPromise;
+      const result = await runningPromise;
+      const durationMs = Date.now() - start;
+
+      lastCronStatus = {
+        lastRun: new Date().toISOString(),
+        status: result.failed > 0 ? 'failed' : 'success',
+        sent: result.sent,
+        failed: result.failed,
+        durationMs,
+      };
+
+      logger.cronResult(result.sent, result.failed, durationMs);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error(`[Cron] Error en cron de recordatorios: ${msg}`);
+      const durationMs = Date.now() - start;
+
+      logger.error(`Cron reminder run crashed: ${msg}`, {
+        event: 'cron',
+        durationMs,
+        error: msg,
+      });
+
+      lastCronStatus = {
+        lastRun: new Date().toISOString(),
+        status: 'failed',
+        sent: 0,
+        failed: 0,
+        durationMs,
+      };
     }
   }, {
     timezone: 'America/Argentina/Buenos_Aires',
   });
 
-  console.log(`[Cron] Recordatorios programados: "${schedule}" (America/Argentina/Buenos_Aires)`);
+  logger.info(`Reminder cron scheduled: "${schedule}" (America/Argentina/Buenos_Aires)`, {
+    event: 'cron',
+    schedule,
+  });
 }
 
 export async function stopReminderCron(): Promise<void> {
@@ -234,7 +300,7 @@ export async function stopReminderCron(): Promise<void> {
 
   // Wait for in-flight run to complete before shutdown (Finding 5)
   if (runningPromise) {
-    console.log('[Cron] Esperando que la ejecución en curso termine...');
+    logger.info('Waiting for in-flight cron run to finish...', { event: 'cron' });
     try {
       await runningPromise;
     } catch {
@@ -242,5 +308,5 @@ export async function stopReminderCron(): Promise<void> {
     }
   }
 
-  console.log('[Cron] Cron de recordatorios detenido.');
+  logger.info('Reminder cron stopped', { event: 'cron' });
 }

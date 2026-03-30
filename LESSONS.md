@@ -103,3 +103,15 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #25 — Load More basado en estado local vs datos del server
 **Error:** `hasMorePages = page < data.pagination.pages` usaba `page` del estado local que se incrementa ANTES de que el fetch termine. El botón "Cargar más" desaparece antes de que lleguen los datos. Si el fetch falla, el page ya se incrementó y el usuario no puede reintentar.
 **Lección:** Basar condiciones de paginación en `data.pagination.page` (lo que el server confirmó), no en el estado local. Incrementar `page` solo después de un fetch exitoso.
+
+### #26 — Health endpoints que exponen datos operacionales deben estar protegidos
+**Error:** `/health/cron` se montó sin autenticación, exponiendo cantidad de pacientes contactados por día y estado operativo del sistema. Para un sistema de salud, esto permite a un atacante inferir volumen de pacientes y timing attacks.
+**Lección:** Los health endpoints se dividen en dos categorías: (1) liveness (`/health`) que puede ser público porque solo dice "estoy vivo", y (2) endpoints con datos operacionales (`/health/cron`, `/health/deep`) que deben tener al menos un token de acceso. El principio: si el response contiene datos del negocio (conteos, fechas, duraciones), no es un health check — es un endpoint de operaciones.
+
+### #27 — Prisma CLI es devDependency pero se necesita en producción para migrate deploy
+**Error:** El Dockerfile usaba `npm ci --omit=dev` que excluye `prisma` (devDependency), pero `start-api.sh` ejecuta `npx prisma migrate deploy` al arrancar. El container fallaba al iniciar porque `prisma` no existía.
+**Lección:** En Docker multi-stage para monorepos con Prisma, NO regenerar el client ni usar el CLI en la imagen de producción. En cambio, copiar `/node_modules/.prisma/`, `/@prisma/client/`, y `/prisma/` desde el builder stage donde sí están instalados.
+
+### #28 — bcrypt native addon requiere build tools en Alpine
+**Error:** `npm ci --ignore-scripts` en el Dockerfile suprimía la compilación del addon nativo de `bcrypt`. En Alpine (musl libc), los binarios precompilados no existen, así que bcrypt quedaba roto en runtime.
+**Lección:** Si el proyecto usa dependencias con addons nativos (`bcrypt`, `sharp`, `canvas`), NO usar `--ignore-scripts` en el install. Instalar `python3 make g++` en Alpine para la compilación, y limpiar con `apk del` después. Alternativa: migrar a `bcryptjs` (JS puro, sin compilación).

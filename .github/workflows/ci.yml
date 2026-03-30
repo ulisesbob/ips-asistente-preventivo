@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema=packages/db/prisma/schema.prisma
+
+      - name: Build packages/db
+        run: npm run build -w @ips/db
+
+      - name: Build apps/api
+        run: npm run build -w @ips/api
+
+      - name: Build apps/web
+        run: npm run build -w @ips/web
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+
+      - name: Run tests
+        run: npm run test -w @ips/api
+
+  post-deploy-health:
+    needs: ci
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Wait for Railway deploy
+        run: sleep 30
+
+      - name: Verify API health
+        run: |
+          for i in 1 2 3; do
+            if curl -sf "${{ secrets.API_URL }}/health"; then
+              echo "API is healthy"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
+          echo "API health check failed after 3 attempts"
+          exit 1

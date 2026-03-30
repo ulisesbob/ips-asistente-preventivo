@@ -72,10 +72,12 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Importar CSV (drag & drop + preview + validación + confirmación)
 - [x] Conversaciones (chats del bot con filtros y mensajes paginados)
 
-### Paso 10 — Deploy + Test end-to-end
-- [ ] Deploy API en Railway
-- [ ] Deploy Panel en Vercel
-- [ ] Configurar webhook Meta con URL de producción
-- [ ] Crear templates de mensaje y enviar a aprobación de Meta
-- [ ] Seed producción: 9 programas + admin
-- [ ] Test: registrar por bot → ver en panel → marcar control → verificar recordatorio
+### Paso 10 — Deploy + Test end-to-end ✅
+- [x] Deploy API en Railway (Dockerfile multi-stage + start-api.sh + CI/CD pipeline)
+- [x] Deploy Panel en Vercel (next.config.js standalone + security headers)
+- [ ] Configurar webhook Meta con URL de producción (requiere URL desplegada)
+- [ ] Crear templates de mensaje y enviar a aprobación de Meta (requiere Meta Business Manager)
+- [x] Seed producción: 9 programas + admin (seed-prod.ts con ADMIN_PASSWORD requerido)
+- [ ] Test: registrar por bot → ver en panel → marcar control → verificar recordatorio (requiere deploy activo)
+
+**Nota:** Los items sin marcar requieren URLs de producción activas y acceso a Meta Business Manager. La infraestructura de deploy (Dockerfile, CI/CD, scripts, monitoreo, SLOs) está completa.
