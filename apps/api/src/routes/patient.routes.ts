@@ -11,7 +11,7 @@ const router = Router();
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
 const listQuerySchema = z.object({
-  search: z.string().optional(),
+  search: z.string().max(100, 'search no puede superar 100 caracteres').optional(),
   programId: z.string().uuid('programId debe ser un UUID válido').optional(),
   status: z.nativeEnum(PatientProgramStatus).optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -23,7 +23,7 @@ const idParamsSchema = z.object({
 });
 
 const createBodySchema = z.object({
-  fullName: z.string().min(2, 'fullName debe tener al menos 2 caracteres'),
+  fullName: z.string().min(2, 'fullName debe tener al menos 2 caracteres').max(200, 'fullName no puede superar 200 caracteres'),
   dni: z
     .string()
     .regex(/^\d{7,8}$/, 'DNI debe tener 7 u 8 dígitos numéricos'),
@@ -31,24 +31,42 @@ const createBodySchema = z.object({
     .string()
     .regex(/^\+[1-9]\d{1,14}$/, 'Teléfono debe estar en formato E.164')
     .optional(),
-  birthDate: z.string().optional(),
+  birthDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'birthDate debe estar en formato YYYY-MM-DD')
+    .refine((v) => {
+      const d = new Date(v);
+      if (isNaN(d.getTime())) return false;
+      const year = d.getFullYear();
+      return year >= 1900 && d <= new Date();
+    }, 'birthDate debe ser una fecha válida en el pasado')
+    .optional(),
   gender: z.nativeEnum(Gender).optional(),
   consent: z.boolean().default(true),
 });
 
 const updateBodySchema = z.object({
-  fullName: z.string().min(2, 'fullName debe tener al menos 2 caracteres').optional(),
+  fullName: z.string().min(2, 'fullName debe tener al menos 2 caracteres').max(200, 'fullName no puede superar 200 caracteres').optional(),
   phone: z
     .string()
     .regex(/^\+[1-9]\d{1,14}$/, 'Teléfono debe estar en formato E.164')
     .optional(),
-  birthDate: z.string().optional(),
+  birthDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'birthDate debe estar en formato YYYY-MM-DD')
+    .refine((v) => {
+      const d = new Date(v);
+      if (isNaN(d.getTime())) return false;
+      const year = d.getFullYear();
+      return year >= 1900 && d <= new Date();
+    }, 'birthDate debe ser una fecha válida en el pasado')
+    .optional(),
   gender: z.nativeEnum(Gender).optional(),
   consent: z.boolean().optional(),
 });
 
 const importBodySchema = z.object({
-  csvContent: z.string().min(1, 'csvContent es requerido'),
+  csvContent: z.string().min(1, 'csvContent es requerido').max(500_000, 'csvContent no puede superar 500 KB'),
 });
 
 // ─── GET /api/patients ────────────────────────────────────────────────────────
