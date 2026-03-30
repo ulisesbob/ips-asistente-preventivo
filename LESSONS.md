@@ -63,3 +63,7 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #15 — Recalcular fechas derivadas al cambiar estado
 **Error:** `updatePatientProgramStatus` permitía reactivar un patient-program (PAUSED→ACTIVE) sin recalcular `nextReminderDate`. La fecha quedaba en el pasado, y el cron de recordatorios disparaba un reminder inmediatamente.
 **Lección:** Cuando un cambio de estado afecta campos derivados (como `nextReminderDate` derivado de `lastControlDate + frecuencia`), recalcularlos en la misma operación. No confiar en que los datos calculados previamente siguen siendo válidos después de un cambio de estado.
+
+### #16 — No mezclar expresión cron UTC con timezone explícito
+**Error:** En el cron de recordatorios se usó `DEFAULT_CRON = '0 11 * * *'` (pensando en 11 UTC = 8 AM Argentina) PERO también se pasó `timezone: 'America/Argentina/Buenos_Aires'` a node-cron. Esto haría que el cron corra a las 11:00 AM hora Argentina, no a las 8:00 AM.
+**Lección:** Cuando node-cron tiene `timezone` configurado, la expresión cron se interpreta EN ese timezone. Si querés 8 AM Argentina, la expresión debe ser `'0 8 * * *'` con timezone Argentina, NO `'0 11 * * *'`. Elegir UNA convención: o expresión en UTC sin timezone, o expresión en hora local con timezone explícito. Nunca mezclar.

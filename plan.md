@@ -51,13 +51,13 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] "BAJA" → consent = false
 - [x] Tabla conversations + messages (rows individuales)
 
-### Paso 7 — Cron de recordatorios
-- [ ] node-cron todos los días 8:00 AM (UTC-3)
-- [ ] Query: nextReminderDate <= hoy AND consent AND phone NOT NULL
-- [ ] Enviar template vía Meta Cloud API
-- [ ] Crear registro en tabla reminders (SENT o FAILED)
-- [ ] Recalcular nextReminderDate = hoy + frecuencia del programa
-- [ ] Log: "Enviados X recordatorios. Y fallidos."
+### Paso 7 — Cron de recordatorios ✅
+- [x] node-cron todos los días 8:00 AM (UTC-3)
+- [x] Query: nextReminderDate <= hoy AND consent AND phone NOT NULL
+- [x] Enviar template vía Meta Cloud API
+- [x] Crear registro en tabla reminders (SENT o FAILED)
+- [x] Recalcular nextReminderDate = hoy + frecuencia del programa
+- [x] Log: "Enviados X recordatorios. Y fallidos."
 
 ### Paso 8 — Panel web — Pantallas core
 - [ ] Next.js 14 + Tailwind + shadcn/ui en `apps/web/`
