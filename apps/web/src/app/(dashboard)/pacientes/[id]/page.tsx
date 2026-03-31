@@ -369,7 +369,7 @@ export default function PatientDetailPage() {
               value={editDateValue}
               onChange={(e) => setEditDateValue(e.target.value)}
               min={new Date(Date.now() + 86400000).toISOString().slice(0, 10)}
-              max={new Date(Date.now() + 2 * 365 * 86400000).toISOString().slice(0, 10)}
+              max={(() => { const d = new Date(); d.setFullYear(d.getFullYear() + 2); return d.toISOString().slice(0, 10); })()}
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mb-4"
             />
             <div className="flex gap-2 justify-end">

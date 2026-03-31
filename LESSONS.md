@@ -172,6 +172,10 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 **Error:** Las notas operativas de médicos se incluyeron en el system prompt del bot con solo una instrucción de "NO revelar al paciente". Un paciente podría pedir al AI que repita su contexto y obtener las notas.
 **Lección:** La instrucción en lenguaje natural NO es una barrera de seguridad. Si se incluyen datos confidenciales en el system prompt, agregar defensa server-side: verificar post-respuesta si el AI filtró fragmentos del contenido confidencial y reemplazar la respuesta si coincide. La defensa es multicapa: prompt reforzado + filtro de contenido + limitación de lo que se incluye.
 
+### #44 — new Date("YYYY-MM-DD").getDate() devuelve día local, no UTC
+**Error:** `new Date("2026-04-15")` se parsea como UTC midnight. En un server UTC-3, `getDate()` devuelve 14 (día anterior) porque convierte a hora local. El código usaba `getDate()` en vez de `getUTCDate()` para construir la fecha UTC.
+**Lección:** Cuando se parsea un string YYYY-MM-DD con `new Date()`, SIEMPRE usar getters UTC (`getUTCFullYear`, `getUTCMonth`, `getUTCDate`) para extraer componentes. Es el mismo principio de LESSONS #11 pero aplicado al parsing, no al almacenamiento.
+
 ### #43 — String sin constraint DB = bomba de tiempo aunque Zod valide
 **Error:** El campo `content` de `patient_notes` se definió como `String` en Prisma (mapeado a `text` en PostgreSQL) con validación solo en Zod (max 500). Cualquier código futuro que bypasee el service layer podría insertar texto ilimitado.
 **Lección:** Defensa en profundidad: si un campo tiene límite de longitud, aplicarlo en TODAS las capas: Zod (API), service layer (lógica), y `@db.VarChar(N)` en Prisma (DB). La DB es la última línea de defensa y no depende de que el código de aplicación sea correcto.

@@ -308,7 +308,7 @@ export async function updateNextControl(
 
   const now = new Date();
   const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const dateUTC = new Date(Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()));
+  const dateUTC = new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
 
   if (dateUTC <= todayUTC) {
     throw new ValidationError('La fecha debe ser futura');
