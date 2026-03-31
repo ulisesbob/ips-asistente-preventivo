@@ -126,13 +126,13 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Panel: página "Base de conocimiento" para que admin edite/agregue FAQs
 - [x] Bot: inyectar FAQs relevantes en el system prompt según la pregunta del paciente
 
-### Paso 17 — Derivación a humano (escalamiento)
-- [ ] Nuevo status de conversación: ESCALATED
-- [ ] Bot: detectar "quiero hablar con alguien" / "operador" → marcar conversación como ESCALATED
-- [ ] Panel: indicador de conversaciones escaladas en nav + lista filtrada
-- [ ] Panel: vista de chat donde el médico/operador puede responder desde el panel
-- [ ] API: POST /api/conversations/:id/reply (envía mensaje vía WhatsApp desde el panel)
-- [ ] Bot: cuando la conversación está ESCALATED, no responde con AI (pasa todo al humano)
+### Paso 17 — Derivación a humano (escalamiento) ✅
+- [x] Nuevo status de conversación: ESCALATED
+- [x] Bot: detectar "quiero hablar con alguien" / "operador" → marcar conversación como ESCALATED
+- [x] Panel: indicador de conversaciones escaladas en nav + lista filtrada
+- [x] Panel: vista de chat donde el médico/operador puede responder desde el panel
+- [x] API: POST /api/conversations/:id/reply (envía mensaje vía WhatsApp desde el panel)
+- [x] Bot: cuando la conversación está ESCALATED, no responde con AI (pasa todo al humano)
 
 ### Paso 18 — Encuestas post-control
 - [ ] Crear tabla `surveys` (id, patientProgramId, sentAt, responses JSON, completedAt)

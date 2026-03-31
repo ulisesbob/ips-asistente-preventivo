@@ -17,6 +17,13 @@ const E164_PHONE_REGEX = /^\d{7,15}$/;
 const REGISTRATION_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_HISTORY_FOR_DB = 20; // Align with AI service MAX_HISTORY_MESSAGES
 
+// Escalation keywords — patient wants to talk to a human
+const ESCALATION_KEYWORDS = [
+  'operador', 'operadora', 'hablar con alguien', 'persona real',
+  'quiero hablar', 'agente', 'humano', 'atencion humana',
+  'necesito ayuda', 'no me sirve', 'reclamar', 'reclamo', 'queja',
+];
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ConversationState {
@@ -102,8 +109,31 @@ export async function handleIncomingMessage(
     return;
   }
 
-  // 4. If patient found and whatsapp linked → chat mode
+  // 4. Check if conversation is ESCALATED — don't respond with AI, just save message
   if (patient && patient.whatsappLinked) {
+    const activeConv = await prisma.conversation.findFirst({
+      where: { phone: e164Phone, status: ConversationStatus.ESCALATED },
+      select: { id: true },
+    });
+
+    if (activeConv) {
+      // Save message but don't respond — human operator handles this from the panel
+      await prisma.message.create({
+        data: { conversationId: activeConv.id, role: MessageRole.USER, content: text },
+      });
+      return;
+    }
+
+    // 5. Check for escalation keywords
+    const textLower = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const wantsHuman = ESCALATION_KEYWORDS.some((kw) => textLower.includes(kw));
+
+    if (wantsHuman) {
+      await handleEscalation(normalizedPhone, e164Phone, patient.id, text);
+      return;
+    }
+
+    // 6. Normal chat mode
     await handleChat(normalizedPhone, e164Phone, patient, text);
     return;
   }
@@ -417,6 +447,78 @@ async function handleAlta(
   const conversation = await getOrCreateConversation(e164Phone, patientId);
   await saveMessagePair(conversation.id, 'ALTA', message);
   await sendTextMessage(phone, message);
+}
+
+// ─── Escalation Handler ──────────────────────────────────────────────────────
+
+async function handleEscalation(
+  phone: string,
+  e164Phone: string,
+  patientId: string,
+  text: string
+): Promise<void> {
+  const conversation = await getOrCreateConversation(e164Phone, patientId);
+
+  // Mark conversation as ESCALATED
+  await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: { status: ConversationStatus.ESCALATED },
+  });
+
+  const message =
+    'Entendido, voy a derivar tu consulta a un operador del IPS. ' +
+    'Te van a responder por este mismo chat. ' +
+    'Si es urgente, también podés llamar al 0800-888-0109.';
+
+  await saveMessagePair(conversation.id, text, message);
+  await sendTextMessage(phone, message);
+}
+
+// ─── Reply from Panel (operator) ─────────────────────────────────────────────
+
+export async function sendOperatorReply(
+  conversationId: string,
+  replyText: string,
+  doctorId: string
+): Promise<void> {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { id: true, phone: true, status: true },
+  });
+
+  if (!conversation) {
+    throw new Error('Conversación no encontrada');
+  }
+
+  // Normalize phone for sending (remove + prefix, apply Argentina fix LESSONS #40)
+  let sendPhone = conversation.phone.startsWith('+')
+    ? conversation.phone.slice(1)
+    : conversation.phone;
+
+  // Argentina: 549 → 54 (LESSONS #40)
+  if (sendPhone.startsWith('549') && sendPhone.length === 13) {
+    sendPhone = '54' + sendPhone.slice(3);
+  }
+
+  // Save message as SYSTEM (from operator) and send via WhatsApp
+  await prisma.message.create({
+    data: {
+      conversationId,
+      role: MessageRole.SYSTEM,
+      content: `[Operador] ${replyText}`,
+    },
+  });
+
+  await sendTextMessage(sendPhone, replyText);
+}
+
+// ─── Close escalated conversation ────────────────────────────────────────────
+
+export async function closeEscalatedConversation(conversationId: string): Promise<void> {
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { status: ConversationStatus.CLOSED, closedAt: new Date() },
+  });
 }
 
 // ─── Conversation & Message Persistence ───────────────────────────────────────

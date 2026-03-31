@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error-handler';
 import { Role, ConversationStatus } from '@ips/db';
 import * as conversationPanelService from '../services/conversation-panel.service';
+import { sendOperatorReply, closeEscalatedConversation } from '../services/conversation.service';
 
 const router = Router();
 
@@ -77,6 +78,42 @@ router.get(
       data: result,
     });
   }),
+);
+
+// ─── POST /api/conversations/:id/reply — Operator reply via WhatsApp ────────
+
+const replyBodySchema = z.object({
+  message: z.string().min(1, 'Mensaje requerido').max(4096, 'Mensaje muy largo'),
+});
+
+router.post(
+  '/:id/reply',
+  requireAuth,
+  validate(idParamsSchema, 'params'),
+  validate(replyBodySchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params as z.infer<typeof idParamsSchema>;
+    const { message } = req.body as z.infer<typeof replyBodySchema>;
+
+    await sendOperatorReply(id, message, req.doctor!.id);
+
+    res.status(200).json({ status: 'ok' });
+  })
+);
+
+// ─── POST /api/conversations/:id/close — Close escalated conversation ───────
+
+router.post(
+  '/:id/close',
+  requireAuth,
+  validate(idParamsSchema, 'params'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params as z.infer<typeof idParamsSchema>;
+
+    await closeEscalatedConversation(id);
+
+    res.status(200).json({ status: 'ok' });
+  })
 );
 
 export { router as conversationRouter };

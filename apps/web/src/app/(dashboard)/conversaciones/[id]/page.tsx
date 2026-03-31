@@ -2,12 +2,15 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { apiGet } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import {
   ArrowLeft,
   MessageSquare,
   Loader2,
+  Send,
+  PhoneForwarded,
+  XCircle,
 } from 'lucide-react';
 
 interface Message {
@@ -20,7 +23,7 @@ interface Message {
 interface ConversationDetail {
   id: string;
   phone: string;
-  status: 'OPEN' | 'CLOSED';
+  status: 'OPEN' | 'ESCALATED' | 'CLOSED';
   startedAt: string;
   patientName: string | null;
 }
@@ -48,6 +51,8 @@ export default function ConversacionDetallePage() {
   const [page, setPage] = useState(1);
   const chatRef = useRef<HTMLDivElement>(null);
   const initialScrollDone = useRef(false);
+  const [replyText, setReplyText] = useState('');
+  const [replying, setReplying] = useState(false);
 
   const fetchMessages = useCallback(async (pageNum: number, append: boolean) => {
     if (append) {
@@ -95,6 +100,24 @@ export default function ConversacionDetallePage() {
       setPage(nextPage);
     } catch {
       // Page not incremented — user can retry
+    }
+  }
+
+  async function handleReply() {
+    if (!replyText.trim() || replying) return;
+    setReplying(true);
+    try {
+      await apiPost(`/api/conversations/${id}/reply`, { message: replyText.trim() });
+      setReplyText('');
+      await fetchMessages(1, false);
+      // Scroll to bottom after sending
+      setTimeout(() => {
+        if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
+      }, 100);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al enviar');
+    } finally {
+      setReplying(false);
     }
   }
 
@@ -169,15 +192,37 @@ export default function ConversacionDetallePage() {
               </p>
             </div>
           </div>
-          {conversation.status === 'OPEN' ? (
-            <span className="inline-flex text-xs px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">
-              Abierta
-            </span>
-          ) : (
-            <span className="inline-flex text-xs px-2 py-0.5 rounded border bg-slate-50 text-slate-600 border-slate-200">
-              Cerrada
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {conversation.status === 'ESCALATED' && (
+              <button
+                onClick={async () => {
+                  if (!confirm('¿Cerrar esta conversación escalada?')) return;
+                  try {
+                    await apiPost(`/api/conversations/${id}/close`, {});
+                    await fetchMessages(1, false);
+                  } catch (err) {
+                    alert(err instanceof Error ? err.message : 'Error');
+                  }
+                }}
+                className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-input text-muted-foreground hover:bg-accent cursor-pointer"
+              >
+                <XCircle className="w-3 h-3" /> Cerrar
+              </button>
+            )}
+            {conversation.status === 'OPEN' ? (
+              <span className="inline-flex text-xs px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">
+                Abierta
+              </span>
+            ) : conversation.status === 'ESCALATED' ? (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border bg-orange-50 text-orange-700 border-orange-200">
+                <PhoneForwarded className="w-3 h-3" /> Escalada
+              </span>
+            ) : (
+              <span className="inline-flex text-xs px-2 py-0.5 rounded border bg-slate-50 text-slate-600 border-slate-200">
+                Cerrada
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -255,6 +300,37 @@ export default function ConversacionDetallePage() {
           )}
         </div>
       </div>
+      {/* Reply form for ESCALATED conversations */}
+      {conversation.status === 'ESCALATED' && (
+        <div className="bg-white rounded-lg border border-border p-4">
+          <div className="flex gap-2">
+            <textarea
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              placeholder="Escribí tu respuesta al paciente..."
+              rows={2}
+              maxLength={4096}
+              className="flex-1 px-3 py-2 rounded-md border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  handleReply();
+                }
+              }}
+            />
+            <button
+              onClick={handleReply}
+              disabled={replying || !replyText.trim()}
+              className="self-end px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+              title="Enviar (Ctrl+Enter)"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            El mensaje se envía por WhatsApp al paciente.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
