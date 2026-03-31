@@ -70,7 +70,6 @@ export async function listKnowledge(filters: {
 
 export async function getCategories() {
   const results = await prisma.knowledgeBase.findMany({
-    where: { active: true },
     select: { category: true },
     distinct: ['category'],
     orderBy: { category: 'asc' },

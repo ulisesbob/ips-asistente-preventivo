@@ -129,7 +129,7 @@ export function buildSystemPrompt(patient?: PatientContext): string {
     patient.knowledgeBase && patient.knowledgeBase.length > 0
       ? '\nINFORMACIÓN DEL IPS (usá esto para responder si es relevante):\n' +
         patient.knowledgeBase
-          .map((kb) => `[${kb.category}] P: ${kb.question}\nR: ${kb.answer}`)
+          .map((kb) => `[${kb.category.replace(/[\n\r]/g, ' ')}] P: ${kb.question.replace(/[\n\r]/g, ' ')}\nR: ${kb.answer.replace(/[\n\r]/g, ' ')}`)
           .join('\n\n')
       : '';
 

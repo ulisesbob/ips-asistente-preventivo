@@ -12,7 +12,7 @@ const router = Router();
 const listQuerySchema = z.object({
   category: z.string().max(100).optional(),
   search: z.string().max(200).optional(),
-  activeOnly: z.enum(['true', 'false']).optional().transform((v) => v !== 'false'),
+  activeOnly: z.enum(['true', 'false']).optional().transform((v) => v === undefined ? true : v !== 'false'),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });

@@ -323,10 +323,23 @@ async function main() {
     { category: 'Contacto', question: '¿Cómo contacto al IPS?', answer: 'Teléfono: 0800-888-0109 (lunes a viernes 7:00-20:00). Sede Central: Junín 177, Posadas. Delegaciones en: Oberá, Eldorado, Iguazú, Apóstoles, Leandro N. Alem, San Vicente, y más. Consultá la delegación más cercana en el 0800.', sortOrder: 1 },
   ];
 
-  // Clear existing and re-seed
-  await prisma.knowledgeBase.deleteMany();
-  await prisma.knowledgeBase.createMany({ data: kbData });
-  console.log(`  ✓ ${kbData.length} knowledge base entries created\n`);
+  // Upsert by category+question to avoid wiping admin-created entries
+  let kbCreated = 0;
+  for (const kb of kbData) {
+    const existing = await prisma.knowledgeBase.findFirst({
+      where: { category: kb.category, question: kb.question },
+    });
+    if (existing) {
+      await prisma.knowledgeBase.update({
+        where: { id: existing.id },
+        data: { answer: kb.answer, sortOrder: kb.sortOrder },
+      });
+    } else {
+      await prisma.knowledgeBase.create({ data: kb });
+      kbCreated++;
+    }
+  }
+  console.log(`  ✓ ${kbCreated} new + ${kbData.length - kbCreated} updated knowledge base entries\n`);
 
   console.log('Seed completed successfully!');
 }
