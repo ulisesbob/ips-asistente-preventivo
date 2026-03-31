@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -126,7 +126,8 @@ export default function PatientDetailPage() {
   const [notesPages, setNotesPages] = useState(0);
   const [noteContent, setNoteContent] = useState('');
   const [noteSubmitting, setNoteSubmitting] = useState(false);
-  const [notesLoading, setNotesLoading] = useState(false);
+  const notesLoadingRef = useRef(false);
+  const [notesLoadMore, setNotesLoadMore] = useState(false);
 
   const fetchPatient = useCallback(async () => {
     try {
@@ -142,8 +143,8 @@ export default function PatientDetailPage() {
   const [notesError, setNotesError] = useState<string | null>(null);
 
   const fetchNotes = useCallback(async (page = 1) => {
-    if (notesLoading) return;
-    setNotesLoading(true);
+    if (notesLoadingRef.current) return;
+    notesLoadingRef.current = true;
     try {
       setNotesError(null);
       const result = await apiGet<{
@@ -161,9 +162,9 @@ export default function PatientDetailPage() {
     } catch (err) {
       setNotesError(err instanceof Error ? err.message : 'Error al cargar notas');
     } finally {
-      setNotesLoading(false);
+      notesLoadingRef.current = false;
     }
-  }, [id, notesLoading]);
+  }, [id]);
 
   async function handleSubmitNote() {
     const trimmed = noteContent.trim();
@@ -901,11 +902,11 @@ export default function PatientDetailPage() {
             {notesPage < notesPages && (
               <div className="px-5 py-3 text-center">
                 <button
-                  onClick={() => fetchNotes(notesPage + 1)}
-                  disabled={notesLoading}
+                  onClick={async () => { setNotesLoadMore(true); await fetchNotes(notesPage + 1); setNotesLoadMore(false); }}
+                  disabled={notesLoadMore}
                   className="text-xs text-primary hover:underline cursor-pointer disabled:opacity-50"
                 >
-                  {notesLoading ? 'Cargando...' : 'Cargar más notas'}
+                  {notesLoadMore ? 'Cargando...' : 'Cargar más notas'}
                 </button>
               </div>
             )}
