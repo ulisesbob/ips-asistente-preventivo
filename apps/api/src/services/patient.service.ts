@@ -497,3 +497,139 @@ export async function importPatientsFromCsv(csvContent: string): Promise<ImportR
     total: validRows.length,
   };
 }
+
+// ─── EXPORT CSV ─────────────────────────────────────────────────────────────
+
+export interface ExportFilters {
+  programId?: string;
+  status?: PatientProgramStatus;
+}
+
+// LESSONS #30: sanitize CSV injection — prefix dangerous chars with single quote
+function csvSafe(value: string): string {
+  if (/^[=+\-@\t\r]/.test(value)) {
+    return `'${value}`;
+  }
+  return value;
+}
+
+function escapeCsvField(value: string): string {
+  const safe = csvSafe(value);
+  // Quote fields containing comma, quote, or newline
+  if (safe.includes(',') || safe.includes('"') || safe.includes('\n')) {
+    return `"${safe.replace(/"/g, '""')}"`;
+  }
+  return safe;
+}
+
+function formatDateAR(d: Date | null): string {
+  if (!d) return '';
+  return new Intl.DateTimeFormat('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'America/Argentina/Buenos_Aires',
+  }).format(new Date(d));
+}
+
+export async function exportPatientsCsv(
+  doctorId: string,
+  role: Role,
+  filters: ExportFilters
+): Promise<string> {
+  // Resolve program filter (same logic as listPatients)
+  let doctorProgramIds: string[] | undefined;
+  if (role === Role.DOCTOR) {
+    const doctorPrograms = await prisma.doctorProgram.findMany({
+      where: { doctorId },
+      select: { programId: true },
+    });
+    doctorProgramIds = doctorPrograms.map((dp) => dp.programId);
+  }
+
+  let effectiveProgramIds: string[] | undefined;
+  if (doctorProgramIds !== undefined) {
+    if (filters.programId) {
+      effectiveProgramIds = doctorProgramIds.includes(filters.programId)
+        ? [filters.programId]
+        : [];
+    } else {
+      effectiveProgramIds = doctorProgramIds;
+    }
+  } else if (filters.programId) {
+    effectiveProgramIds = [filters.programId];
+  }
+
+  const where: Prisma.PatientWhereInput = {
+    ...(effectiveProgramIds !== undefined || filters.status
+      ? {
+          programs: {
+            some: {
+              ...(effectiveProgramIds ? { programId: { in: effectiveProgramIds } } : {}),
+              ...(filters.status ? { status: filters.status } : {}),
+            },
+          },
+        }
+      : {}),
+  };
+
+  const patients = await prisma.patient.findMany({
+    where,
+    take: 5000, // LESSONS #13
+    orderBy: { fullName: 'asc' },
+    select: {
+      fullName: true,
+      dni: true,
+      phone: true,
+      programs: {
+        where: {
+          ...(effectiveProgramIds ? { programId: { in: effectiveProgramIds } } : {}),
+          ...(filters.status ? { status: filters.status } : {}),
+        },
+        select: {
+          status: true,
+          lastControlDate: true,
+          nextReminderDate: true,
+          program: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  // Build CSV
+  const header = 'Nombre,DNI,Teléfono,Programa,Último Control,Próximo Control,Estado';
+  const rows: string[] = [header];
+
+  for (const p of patients) {
+    if (p.programs.length === 0) {
+      // Patient with no matching programs (edge case)
+      rows.push(
+        [
+          escapeCsvField(p.fullName),
+          escapeCsvField(p.dni),
+          p.phone || '',
+          '',
+          '',
+          '',
+          '',
+        ].join(',')
+      );
+    } else {
+      for (const pp of p.programs) {
+        rows.push(
+          [
+            escapeCsvField(p.fullName),
+            escapeCsvField(p.dni),
+            p.phone || '',
+            escapeCsvField(pp.program.name),
+            formatDateAR(pp.lastControlDate),
+            formatDateAR(pp.nextReminderDate),
+            pp.status,
+          ].join(',')
+        );
+      }
+    }
+  }
+
+  return rows.join('\n');
+}

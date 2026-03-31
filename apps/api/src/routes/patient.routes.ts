@@ -118,6 +118,37 @@ router.post(
   })
 );
 
+// ─── GET /api/patients/export — Export CSV ────────────────────────────────────
+// Registered BEFORE /:id to avoid "export" being matched as a UUID param
+
+const exportQuerySchema = z.object({
+  programId: z.string().uuid('programId debe ser un UUID válido').optional(),
+  status: z.nativeEnum(PatientProgramStatus).optional(),
+});
+
+router.get(
+  '/export',
+  requireAuth,
+  validate(exportQuerySchema, 'query'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const query = req.query as unknown as z.infer<typeof exportQuerySchema>;
+
+    const csv = await patientService.exportPatientsCsv(
+      req.doctor!.id,
+      req.doctor!.role as Role,
+      {
+        programId: query.programId,
+        status: query.status,
+      }
+    );
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="pacientes.csv"');
+    // BOM for Excel UTF-8 support (LESSONS #22 — this time we ADD it for export)
+    res.status(200).send('\uFEFF' + csv);
+  })
+);
+
 // ─── GET /api/patients/:id ────────────────────────────────────────────────────
 
 router.get(

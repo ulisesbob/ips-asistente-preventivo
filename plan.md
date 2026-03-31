@@ -106,14 +106,14 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Panel: sección "Alertas" en Dashboard con semáforo y lista de pacientes
 - [x] Permisos: DOCTOR ve solo alertas de sus programas
 
-### Paso 14 — Exportar datos
-- [ ] API: GET /api/patients/export?format=csv con filtros (programa, status)
-- [ ] Columnas: nombre, DNI, teléfono, programas, último control, próximo control, estado
-- [ ] Sanitización CSV injection en todos los campos exportados (LESSONS #30)
-- [ ] Panel: botón "Exportar CSV" en la lista de pacientes
+### Paso 14 — Exportar datos ✅
+- [x] API: GET /api/patients/export?format=csv con filtros (programa, status)
+- [x] Columnas: nombre, DNI, teléfono, programas, último control, próximo control, estado
+- [x] Sanitización CSV injection en todos los campos exportados (LESSONS #30)
+- [x] Panel: botón "Exportar CSV" en la lista de pacientes
 
-### Paso 15 — Editar datos del paciente
-- [ ] API: ya existe PATCH /api/patients/:id — verificar que acepta todos los campos
-- [ ] Panel: botón "Editar" en ficha del paciente con dialog para nombre, teléfono, birthDate, gender
-- [ ] Validación: DNI no editable (es la clave de deduplicación), teléfono E.164
-- [ ] Permisos: ADMIN y DOCTOR de los programas del paciente
+### Paso 15 — Editar datos del paciente ✅
+- [x] API: ya existe PATCH /api/patients/:id — verificar que acepta todos los campos
+- [x] Panel: botón "Editar" en ficha del paciente con dialog para nombre, teléfono, birthDate, gender
+- [x] Validación: DNI no editable (es la clave de deduplicación), teléfono E.164
+- [x] Permisos: ADMIN y DOCTOR de los programas del paciente

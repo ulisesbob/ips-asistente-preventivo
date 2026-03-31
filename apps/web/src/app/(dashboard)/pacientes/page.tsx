@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPost, getAccessToken } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import {
   Search,
@@ -12,6 +12,7 @@ import {
   Users,
   Filter,
   Plus,
+  Download,
 } from 'lucide-react';
 
 interface Patient {
@@ -203,6 +204,30 @@ export default function PacientesPage() {
           <span className="text-sm text-muted-foreground">
             {data ? `${data.pagination.total} pacientes` : ''}
           </span>
+          <button
+            onClick={async () => {
+              const params = [programId && `programId=${programId}`, status && `status=${status}`].filter(Boolean).join('&');
+              const url = `/api/patients/export${params ? `?${params}` : ''}`;
+              try {
+                const res = await fetch(url, {
+                  headers: { Authorization: `Bearer ${getAccessToken()}` },
+                  credentials: 'include',
+                });
+                if (!res.ok) throw new Error('Error al exportar');
+                const blob = await res.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'pacientes.csv';
+                a.click();
+                URL.revokeObjectURL(a.href);
+              } catch (err) {
+                alert(err instanceof Error ? err.message : 'Error al exportar');
+              }
+            }}
+            className="inline-flex items-center gap-1 text-xs px-3 py-2 rounded-md border border-input text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" /> Exportar CSV
+          </button>
           <button
             onClick={() => setShowCreate(true)}
             className="inline-flex items-center gap-1 text-xs px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"

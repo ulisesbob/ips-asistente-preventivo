@@ -22,6 +22,7 @@ import {
   StickyNote,
   Send,
   CalendarDays,
+  Pencil,
 } from 'lucide-react';
 
 interface PatientDetail {
@@ -100,6 +101,9 @@ export default function PatientDetailPage() {
   const [editDatePpId, setEditDatePpId] = useState<string | null>(null);
   const [editDateValue, setEditDateValue] = useState('');
   const [editDateLoading, setEditDateLoading] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState({ fullName: '', phone: '', birthDate: '', gender: '' });
+  const [editLoading, setEditLoading] = useState(false);
   const [notes, setNotes] = useState<PatientNoteItem[]>([]);
   const [notesPage, setNotesPage] = useState(1);
   const [notesTotal, setNotesTotal] = useState(0);
@@ -223,6 +227,42 @@ export default function PatientDetailPage() {
     setEditDatePpId(ppId);
   }
 
+  function openEditDialog() {
+    if (!patient) return;
+    setEditForm({
+      fullName: patient.fullName,
+      phone: patient.phone || '',
+      birthDate: patient.birthDate ? patient.birthDate.slice(0, 10) : '',
+      gender: patient.gender || '',
+    });
+    setShowEdit(true);
+  }
+
+  async function handleEditPatient() {
+    if (!patient) return;
+    setEditLoading(true);
+    try {
+      const body: Record<string, string | undefined> = {};
+      if (editForm.fullName !== patient.fullName) body.fullName = editForm.fullName;
+      if (editForm.phone !== (patient.phone || '')) body.phone = editForm.phone || undefined;
+      if (editForm.birthDate !== (patient.birthDate ? patient.birthDate.slice(0, 10) : '')) body.birthDate = editForm.birthDate || undefined;
+      if (editForm.gender !== (patient.gender || '')) body.gender = editForm.gender || undefined;
+
+      if (Object.keys(body).length === 0) {
+        setShowEdit(false);
+        return;
+      }
+
+      await apiPatch(`/api/patients/${id}`, body);
+      setShowEdit(false);
+      await fetchPatient();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al guardar');
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
   async function handleUpdateNextControl() {
     if (!editDatePpId || !editDateValue) return;
     setEditDateLoading(true);
@@ -279,6 +319,12 @@ export default function PatientDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={openEditDialog}
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-input text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+            >
+              <Pencil className="w-3 h-3" /> Editar
+            </button>
             {patient.consent ? (
               <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">
                 <Shield className="w-3 h-3" /> Consentimiento activo
@@ -354,6 +400,82 @@ export default function PatientDetailPage() {
                   {enrollLoading ? 'Inscribiendo...' : 'Inscribir'}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit patient dialog */}
+      {showEdit && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-border p-6 w-full max-w-md mx-4">
+            <h3 className="text-sm font-semibold text-foreground mb-4">Editar paciente</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Nombre completo</label>
+                <input
+                  type="text"
+                  value={editForm.fullName}
+                  onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">DNI (no editable)</label>
+                <input
+                  type="text"
+                  value={patient?.dni ?? ''}
+                  disabled
+                  className="w-full h-9 px-3 rounded-md border border-input bg-slate-50 text-sm text-muted-foreground"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Teléfono (E.164, ej: +5493764123456)</label>
+                <input
+                  type="text"
+                  value={editForm.phone}
+                  onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                  placeholder="+5493764123456"
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Fecha de nacimiento</label>
+                <input
+                  type="date"
+                  value={editForm.birthDate}
+                  onChange={(e) => setEditForm({ ...editForm, birthDate: e.target.value })}
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Género</label>
+                <select
+                  value={editForm.gender}
+                  onChange={(e) => setEditForm({ ...editForm, gender: e.target.value })}
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                >
+                  <option value="">Sin especificar</option>
+                  <option value="M">Masculino</option>
+                  <option value="F">Femenino</option>
+                  <option value="OTRO">Otro</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end mt-4">
+              <button
+                onClick={() => setShowEdit(false)}
+                className="text-xs px-3 py-2 rounded-md border border-input text-muted-foreground hover:bg-accent cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleEditPatient}
+                disabled={editLoading || !editForm.fullName.trim()}
+                className="text-xs px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+              >
+                {editLoading ? 'Guardando...' : 'Guardar'}
+              </button>
             </div>
           </div>
         </div>
