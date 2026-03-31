@@ -138,7 +138,11 @@ export function buildSystemPrompt(patient?: PatientContext): string {
     patient.medications && patient.medications.length > 0
       ? '\nMEDICACIÓN ACTIVA (el paciente recibe recordatorios diarios por WhatsApp):\n' +
         patient.medications
-          .map((m) => `- ${m.medicationName} (${m.dosage}) — todos los días a las ${String(m.reminderHour).padStart(2, '0')}:${String(m.reminderMinute).padStart(2, '0')} hs`)
+          .map((m) => {
+            const safeName = m.medicationName.replace(/[\n\r\\]/g, '').slice(0, 100);
+            const safeDosage = m.dosage.replace(/[\n\r\\]/g, '').slice(0, 100);
+            return `- ${safeName} (${safeDosage}) — todos los días a las ${String(m.reminderHour).padStart(2, '0')}:${String(m.reminderMinute).padStart(2, '0')} hs`;
+          })
           .join('\n')
       : '';
 
