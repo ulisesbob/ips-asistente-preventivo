@@ -16,12 +16,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Has cookie but on login page → redirect to home
-  if (hasRefreshToken && isPublicPath) {
-    const homeUrl = request.nextUrl.clone();
-    homeUrl.pathname = '/';
-    return NextResponse.redirect(homeUrl);
-  }
+  // Has cookie but on login page → let the page handle it.
+  // Do NOT redirect to home here. The cookie might be expired/invalid,
+  // and redirecting would cause an infinite loop:
+  // middleware→home→AuthProvider 401→layout→/login→middleware→home→...
+  // The login page itself will redirect to /dashboard after a successful login.
 
   return NextResponse.next();
 }

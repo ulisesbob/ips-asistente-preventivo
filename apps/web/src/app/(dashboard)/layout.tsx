@@ -49,8 +49,12 @@ export default function DashboardLayout({
   }
 
   if (!doctor) {
-    router.push('/login');
-    return null;
+    router.replace('/login');
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <Activity className="w-6 h-6 animate-pulse text-primary" />
+      </div>
+    );
   }
 
   const initials = doctor.fullName
