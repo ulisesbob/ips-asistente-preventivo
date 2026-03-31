@@ -14,6 +14,12 @@ interface PatientNote {
   doctor: { fullName: string };
 }
 
+interface KBEntry {
+  category: string;
+  question: string;
+  answer: string;
+}
+
 interface PatientContext {
   fullName: string;
   programs: Array<{
@@ -24,6 +30,7 @@ interface PatientContext {
     nextReminderDate: Date;
   }>;
   notes?: PatientNote[];
+  knowledgeBase?: KBEntry[];
 }
 
 // ─── Singleton Client ─────────────────────────────────────────────────────────
@@ -118,12 +125,21 @@ export function buildSystemPrompt(patient?: PatientContext): string {
     ? `\nPROGRAMAS INSCRIPTOS (USÁLOS PARA RESPONDER):\n${programInfo}\n\nEJEMPLO DE RESPUESTA CORRECTA: "Tu próximo control del programa Diabetes es el 15/06/2026. Podés acercarte al Laboratorio Central IPS (Posadas) en Junín 177."`
     : '\nEl paciente no tiene programas inscriptos actualmente. En este caso sí derivá al 0800-888-0109.';
 
+  const kbInfo =
+    patient.knowledgeBase && patient.knowledgeBase.length > 0
+      ? '\nINFORMACIÓN DEL IPS (usá esto para responder si es relevante):\n' +
+        patient.knowledgeBase
+          .map((kb) => `[${kb.category}] P: ${kb.question}\nR: ${kb.answer}`)
+          .join('\n\n')
+      : '';
+
   return `${BASE_RULES}
 
 DATOS DEL PACIENTE:
 - Nombre: ${patient.fullName}
 ${programSection}
 ${notesInfo}
+${kbInfo}
 
 ${DISCLAIMER}`;
 }

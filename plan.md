@@ -117,3 +117,27 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Panel: botón "Editar" en ficha del paciente con dialog para nombre, teléfono, birthDate, gender
 - [x] Validación: DNI no editable (es la clave de deduplicación), teléfono E.164
 - [x] Permisos: ADMIN y DOCTOR de los programas del paciente
+
+### Paso 16 — Base de conocimiento del IPS (coberturas + FAQs + programas) ✅
+- [x] Crear tabla `knowledge_base` (id, category, question, answer, order, active)
+- [x] Seed: cargar FAQs del IPS (horarios, coberturas, requisitos, medicamentos, trámites)
+- [x] Seed: info detallada de cada programa de salud (qué controles, cada cuánto, requisitos)
+- [x] API: GET /api/knowledge (público, para el bot) + CRUD admin para gestionar
+- [x] Panel: página "Base de conocimiento" para que admin edite/agregue FAQs
+- [x] Bot: inyectar FAQs relevantes en el system prompt según la pregunta del paciente
+
+### Paso 17 — Derivación a humano (escalamiento)
+- [ ] Nuevo status de conversación: ESCALATED
+- [ ] Bot: detectar "quiero hablar con alguien" / "operador" → marcar conversación como ESCALATED
+- [ ] Panel: indicador de conversaciones escaladas en nav + lista filtrada
+- [ ] Panel: vista de chat donde el médico/operador puede responder desde el panel
+- [ ] API: POST /api/conversations/:id/reply (envía mensaje vía WhatsApp desde el panel)
+- [ ] Bot: cuando la conversación está ESCALATED, no responde con AI (pasa todo al humano)
+
+### Paso 18 — Encuestas post-control
+- [ ] Crear tabla `surveys` (id, patientProgramId, sentAt, responses JSON, completedAt)
+- [ ] Lógica: cuando el médico marca "control realizado", el bot envía encuesta 24hs después
+- [ ] Encuesta: "¿Pudiste hacer tu control?" (Sí/No) + "¿Cómo te atendieron?" (1-5)
+- [ ] Bot: parsear respuestas y guardar en la tabla
+- [ ] Panel: sección "Encuestas" en dashboard con métricas de satisfacción
+- [ ] API: GET /api/dashboard/surveys (stats de satisfacción)

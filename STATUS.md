@@ -2,9 +2,9 @@
 
 ## Estado actual
 - **Último paso completado:** Paso 15 — Editar datos del paciente
-- **Paso actual:** TODOS LOS PASOS COMPLETADOS (1-15)
+- **Paso actual:** Paso 17 — Derivación a humano
 - **Bloqueadores:** Ninguno
-- **Próxima acción:** Deploy a producción con los nuevos features
+- **Próxima acción:** Implementar Paso 17 (ESCALATED status + panel chat + reply WA)
 
 ## Historial
 | Fecha | Paso | Qué se hizo |

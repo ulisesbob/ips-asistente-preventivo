@@ -8,6 +8,7 @@ import {
 import { sendTextMessage } from './whatsapp.service';
 import { generateResponse, buildSystemPrompt, ChatMessage } from './ai.service';
 import { getLatestNotesForBot } from './note.service';
+import { getRelevantKBForBot } from './knowledge.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -298,8 +299,11 @@ async function handleChat(
   },
   text: string
 ): Promise<void> {
-  // Fetch latest operational notes for bot context
-  const notes = await getLatestNotesForBot(patient.id);
+  // Fetch context for AI: notes + relevant knowledge base
+  const [notes, kbEntries] = await Promise.all([
+    getLatestNotesForBot(patient.id),
+    getRelevantKBForBot(text),
+  ]);
 
   // Build system prompt with patient context + notes
   const systemPrompt = buildSystemPrompt({
@@ -312,6 +316,7 @@ async function handleChat(
       nextReminderDate: pp.nextReminderDate,
     })),
     notes,
+    knowledgeBase: kbEntries,
   });
 
   // Debug: log what the AI will see

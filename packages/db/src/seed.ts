@@ -286,6 +286,48 @@ async function main() {
   console.log(`  ✓ ${patientCount} patients created`);
   console.log(`  ✓ ${enrollmentCount} program enrollments created\n`);
 
+  // ─── Knowledge Base (FAQs + Coberturas + Info programas) ─────────
+  console.log('Seeding knowledge base...');
+
+  const kbData = [
+    // Coberturas y prestaciones
+    { category: 'Coberturas', question: '¿Qué cubre el IPS?', answer: 'El IPS cubre consultas médicas, estudios de laboratorio, diagnóstico por imágenes, internación, cirugías, medicamentos (con descuento), prótesis y ortesis, rehabilitación, salud mental, y odontología. La cobertura es para afiliados activos y su grupo familiar.', sortOrder: 1 },
+    { category: 'Coberturas', question: '¿El IPS cubre lentes/anteojos?', answer: 'Sí, el IPS cubre lentes con receta del oftalmólogo del IPS. Tenés que presentar la receta en Óptica Social (Junín 177, Posadas) o en tu delegación. La cobertura incluye armazón básico + cristales. Se renueva cada 2 años.', sortOrder: 2 },
+    { category: 'Coberturas', question: '¿El IPS cubre prótesis dentales?', answer: 'Sí, el IPS cubre prótesis dentales parciales y completas. Necesitás orden del odontólogo del IPS. El trámite se hace en Junín 177 (Posadas) o en tu delegación.', sortOrder: 3 },
+    { category: 'Coberturas', question: '¿Cómo retiro medicamentos?', answer: 'Los medicamentos se retiran en la Farmacia del IPS (Junín 177, Posadas) o en la farmacia de tu delegación, con receta del médico del IPS. Muchos medicamentos son gratuitos para programas crónicos (Diabetes, Hipertensión). Otros tienen descuento del 40-70%.', sortOrder: 4 },
+    { category: 'Coberturas', question: '¿El IPS cubre cirugías?', answer: 'Sí, el IPS cubre cirugías programadas y de urgencia en los hospitales y sanatorios de su red. Necesitás autorización previa de Auditoría Médica para cirugías programadas. Pedí turno con el especialista y él inicia el trámite.', sortOrder: 5 },
+
+    // Trámites y turnos
+    { category: 'Trámites', question: '¿Cómo saco turno con un especialista?', answer: 'Podés sacar turno de 3 formas: (1) Por teléfono al 0800-888-0109, (2) Personalmente en Junín 177 o tu delegación, (3) Con derivación de tu médico de cabecera. Para especialistas muy demandados (traumatología, dermatología) conviene sacar turno con anticipación.', sortOrder: 1 },
+    { category: 'Trámites', question: '¿Qué necesito para hacerme estudios de laboratorio?', answer: 'Necesitás: (1) Orden médica del IPS, (2) DNI, (3) Credencial del IPS vigente. Para análisis de sangre: ir en ayunas de 8-12 horas. Laboratorio Central: Junín 177 (Posadas), lunes a viernes 6:30 a 10:00.', sortOrder: 2 },
+    { category: 'Trámites', question: '¿Cómo actualizo mi credencial del IPS?', answer: 'La credencial se actualiza en las oficinas del IPS (Junín 177, Posadas o delegaciones). Necesitás: DNI, último recibo de sueldo, y partida de nacimiento de los menores si los agregás al grupo familiar.', sortOrder: 3 },
+    { category: 'Trámites', question: '¿Cómo agrego a mi familia al IPS?', answer: 'Podés agregar cónyuge e hijos menores de 21 años (o 25 si estudian). Presentate en Junín 177 o tu delegación con: DNI del titular y del familiar, partida de nacimiento o matrimonio, certificado de convivencia si corresponde.', sortOrder: 4 },
+    { category: 'Trámites', question: '¿Cuáles son los horarios de atención?', answer: 'Sede Central (Junín 177, Posadas): lunes a viernes 7:00 a 17:00. Laboratorio: 6:30 a 10:00. Farmacia: 7:00 a 17:00. Delegaciones del interior: lunes a viernes 7:00 a 13:00. El 0800-888-0109 atiende de 7:00 a 20:00.', sortOrder: 5 },
+
+    // Programas de salud - info detallada
+    { category: 'Programas', question: '¿Qué es el programa de Diabetes?', answer: 'El Programa de Diabetes del IPS incluye: control de hemoglobina glicosilada cada 3 meses (gratuito), consulta con diabetólogo, medicación gratuita (insulina, metformina, tiras reactivas), y educación diabetológica. Llevá tu glucómetro a cada control.', sortOrder: 1 },
+    { category: 'Programas', question: '¿Qué es el programa Mujer Sana?', answer: 'Mujer Sana es un programa preventivo anual que incluye: mamografía, PAP, colposcopia, y consulta ginecológica. Todo cubierto al 100% con la chequera Mujer Sana que retirás en Junín 177 o tu delegación. A partir de 40 años o antes si hay antecedentes.', sortOrder: 2 },
+    { category: 'Programas', question: '¿Qué es el programa Hombre Sano?', answer: 'Hombre Sano incluye: análisis de PSA, sangre oculta en materia fecal, hemograma, glucemia, y consulta urológica anual. Cubierto al 100% con la chequera que retirás en la sede. Recomendado a partir de 40 años.', sortOrder: 3 },
+    { category: 'Programas', question: '¿Qué es PREDHICAR/Hipertensión?', answer: 'PREDHICAR es el programa para hipertensos. Incluye: control de presión mensual, medicación antihipertensiva gratuita, análisis de sangre y orina periódicos, y consulta con cardiólogo. Es fundamental no abandonar la medicación.', sortOrder: 4 },
+    { category: 'Programas', question: '¿Qué es el programa Oncológico?', answer: 'El Programa Oncológico del IPS cubre: quimioterapia, radioterapia, medicación oncológica, estudios de seguimiento, y acompañamiento psicológico. Los controles varían según el tipo de cáncer (cada 3, 6 o 12 meses). Coordiná con tu oncólogo.', sortOrder: 5 },
+    { category: 'Programas', question: '¿Qué es el Plan Materno Infantil?', answer: 'El Plan Materno Infantil cubre todo el embarazo: controles obstétricos mensuales, ecografías, análisis, parto (natural o cesárea), y control del recién nacido. Inscribite apenas confirmes el embarazo para acceder a todos los beneficios.', sortOrder: 6 },
+    { category: 'Programas', question: '¿Qué es el programa de Celíacos?', answer: 'El Programa de Celíacos incluye: diagnóstico (anticuerpos + biopsia), control anual con gastroenterólogo, y un subsidio mensual para alimentos sin TACC. Presentá el certificado médico en Junín 177 para acceder al subsidio.', sortOrder: 7 },
+    { category: 'Programas', question: '¿Qué es el programa de Osteoporosis?', answer: 'El Programa de Osteoporosis incluye: densitometría ósea anual, medicación (calcio, vitamina D, bifosfonatos) con cobertura, y consulta con reumatólogo. Recomendado para mujeres post-menopáusicas y mayores de 65 años.', sortOrder: 8 },
+    { category: 'Programas', question: '¿Qué es el programa de Cáncer de Colon?', answer: 'El Programa de Cáncer de Colon incluye: test de sangre oculta en materia fecal anual, colonoscopía (si el test es positivo o hay antecedentes), y seguimiento con gastroenterólogo. Recomendado a partir de 50 años.', sortOrder: 9 },
+
+    // Urgencias y emergencias
+    { category: 'Urgencias', question: '¿Qué hago en una emergencia?', answer: 'En emergencia: (1) Llamá al 107 (SAME) o andá a la guardia más cercana de la red IPS, (2) Presentá DNI y credencial, (3) Si te atienden en un lugar fuera de la red, podés pedir reintegro después en Auditoría Médica. Guardias 24hs: Hospital Madariaga (Posadas), Hospital SAMIC (Oberá, Eldorado).', sortOrder: 1 },
+    { category: 'Urgencias', question: '¿El IPS cubre ambulancia?', answer: 'Sí, el IPS cubre traslado en ambulancia dentro de la provincia para emergencias y derivaciones. Coordiná con el 0800-888-0109 o directamente desde la guardia del hospital.', sortOrder: 2 },
+
+    // Contacto
+    { category: 'Contacto', question: '¿Cómo contacto al IPS?', answer: 'Teléfono: 0800-888-0109 (lunes a viernes 7:00-20:00). Sede Central: Junín 177, Posadas. Delegaciones en: Oberá, Eldorado, Iguazú, Apóstoles, Leandro N. Alem, San Vicente, y más. Consultá la delegación más cercana en el 0800.', sortOrder: 1 },
+  ];
+
+  // Clear existing and re-seed
+  await prisma.knowledgeBase.deleteMany();
+  await prisma.knowledgeBase.createMany({ data: kbData });
+  console.log(`  ✓ ${kbData.length} knowledge base entries created\n`);
+
   console.log('Seed completed successfully!');
 }
 

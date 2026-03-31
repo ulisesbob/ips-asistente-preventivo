@@ -205,3 +205,18 @@ model PatientNote {
   @@index([doctorId])
   @@map("patient_notes")
 }
+
+model KnowledgeBase {
+  id        String   @id @default(uuid()) @db.Uuid
+  category  String   @db.VarChar(100)
+  question  String   @db.VarChar(500)
+  answer    String   @db.VarChar(2000)
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz()
+  updatedAt DateTime @updatedAt @db.Timestamptz()
+
+  @@index([category, active])
+  @@index([active, sortOrder])
+  @@map("knowledge_base")
+}
