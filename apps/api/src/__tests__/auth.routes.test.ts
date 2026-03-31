@@ -10,6 +10,21 @@ vi.mock('@ips/db', () => ({
     ADMIN: 'ADMIN',
     DOCTOR: 'DOCTOR',
   },
+  PatientProgramStatus: {
+    ACTIVE: 'ACTIVE',
+    PAUSED: 'PAUSED',
+    COMPLETED: 'COMPLETED',
+  },
+  Gender: {
+    M: 'M',
+    F: 'F',
+    OTRO: 'OTRO',
+  },
+  ConversationStatus: {
+    OPEN: 'OPEN',
+    ESCALATED: 'ESCALATED',
+    CLOSED: 'CLOSED',
+  },
   Prisma: {
     PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
       code: string;
