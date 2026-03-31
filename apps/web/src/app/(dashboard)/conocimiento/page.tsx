@@ -28,7 +28,7 @@ interface KBResponse {
 
 export default function ConocimientoPage() {
   const { doctor } = useAuth();
-  const isAdmin = doctor?.role === 'ADMIN';
+  const canEdit = !!doctor; // todos los médicos y admin pueden editar
 
   const [data, setData] = useState<KBResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -139,7 +139,7 @@ export default function ConocimientoPage() {
           <BookOpen className="w-5 h-5" />
           Base de conocimiento
         </h1>
-        {isAdmin && (
+        {canEdit && (
           <button
             onClick={openCreate}
             className="inline-flex items-center gap-1 text-xs px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
@@ -197,7 +197,7 @@ export default function ConocimientoPage() {
                       </span>
                     )}
                   </div>
-                  {isAdmin && (
+                  {canEdit && (
                     <div className="flex gap-1">
                       <button
                         onClick={() => handleToggleActive(entry)}

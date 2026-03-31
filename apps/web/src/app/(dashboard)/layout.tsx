@@ -30,7 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/medicos', label: 'Médicos', icon: Stethoscope, adminOnly: true },
   { href: '/importar', label: 'Importar CSV', icon: Upload, adminOnly: true },
   { href: '/conversaciones', label: 'Conversaciones', icon: MessageSquare },
-  { href: '/conocimiento', label: 'Base de conocimiento', icon: BookOpen, adminOnly: true },
+  { href: '/conocimiento', label: 'Base de conocimiento', icon: BookOpen },
 ];
 
 export default function DashboardLayout({
