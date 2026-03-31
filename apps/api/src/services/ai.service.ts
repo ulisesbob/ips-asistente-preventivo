@@ -113,11 +113,15 @@ export function buildSystemPrompt(patient?: PatientContext): string {
           .join('\n')
       : '';
 
+  const programSection = patient.programs.length > 0
+    ? `\nPROGRAMAS INSCRIPTOS (USÁLOS PARA RESPONDER):\n${programInfo}\n\nEJEMPLO DE RESPUESTA CORRECTA: "Tu próximo control del programa Diabetes es el 15/06/2026. Podés acercarte al Laboratorio Central IPS (Posadas) en Junín 177."`
+    : '\nEl paciente no tiene programas inscriptos actualmente. En este caso sí derivá al 0800-888-0109.';
+
   return `${BASE_RULES}
 
 DATOS DEL PACIENTE:
 - Nombre: ${patient.fullName}
-${patient.programs.length > 0 ? `\nPROGRAMAS INSCRIPTOS:\n${programInfo}` : '\nEl paciente no tiene programas inscriptos actualmente.'}
+${programSection}
 ${notesInfo}
 
 ${DISCLAIMER}`;

@@ -314,13 +314,24 @@ async function handleChat(
     notes,
   });
 
-  // Get conversation history
+  // Debug: log what the AI will see
+  console.log(`[Bot] Patient ${patient.fullName} has ${patient.programs.length} active programs`);
+  if (patient.programs.length > 0) {
+    patient.programs.forEach((pp) => {
+      console.log(`[Bot]   - ${pp.program.name}: next=${pp.nextReminderDate}, last=${pp.lastControlDate}`);
+    });
+  }
+
+  // Get conversation history — limit to last 6 messages to avoid old prompt contamination
   const conversation = await getOrCreateConversation(e164Phone, patient.id);
   const history = await getConversationHistory(conversation.id);
 
+  // Only use recent history (3 exchanges) to prevent old response patterns from dominating
+  const recentHistory = history.slice(-6);
+
   // Add user message to history for AI
   const messagesForAi: ChatMessage[] = [
-    ...history,
+    ...recentHistory,
     { role: 'user' as const, content: text },
   ];
 
