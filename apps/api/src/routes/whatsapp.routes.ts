@@ -15,7 +15,7 @@ const whatsappRouter = Router();
 
 const webhookLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 300,
+  max: 1000, // Support 500+ concurrent patients
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: () => 'whatsapp-webhook', // single bucket for all Meta IPs

@@ -169,8 +169,43 @@ ${DISCLAIMER}`;
 // ─── Generate AI Response ─────────────────────────────────────────────────────
 
 const MAX_HISTORY_MESSAGES = 20;
+const MAX_CONCURRENT_AI_CALLS = 50; // Limit concurrent Claude API calls
+let activeAiCalls = 0;
+const aiQueue: Array<{ resolve: () => void }> = [];
+
+async function acquireAiSlot(): Promise<void> {
+  if (activeAiCalls < MAX_CONCURRENT_AI_CALLS) {
+    activeAiCalls++;
+    return;
+  }
+  // Wait in queue
+  return new Promise((resolve) => {
+    aiQueue.push({ resolve });
+  });
+}
+
+function releaseAiSlot(): void {
+  activeAiCalls--;
+  const next = aiQueue.shift();
+  if (next) {
+    activeAiCalls++;
+    next.resolve();
+  }
+}
 
 export async function generateResponse(
+  systemPrompt: string,
+  history: ChatMessage[]
+): Promise<string> {
+  await acquireAiSlot();
+  try {
+    return await _generateResponse(systemPrompt, history);
+  } finally {
+    releaseAiSlot();
+  }
+}
+
+async function _generateResponse(
   systemPrompt: string,
   history: ChatMessage[]
 ): Promise<string> {
