@@ -195,3 +195,7 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #48 — router.replace() durante el render de React causa crash
 **Error:** En `layout.tsx`, `router.replace('/login')` se llamaba durante el render cuando `!doctor`. Esto viola las reglas de React ("Cannot update a component while rendering a different component") y puede causar loops infinitos.
 **Lección:** Las navegaciones en React SIEMPRE van dentro de `useEffect`, nunca en el cuerpo del render. El render debe ser puro — sin side effects.
+
+### #49 — res.json() en respuestas HTTP 204 tira SyntaxError
+**Error:** `apiFetch` llamaba `res.json()` incondicionalmente. Los endpoints DELETE devuelven HTTP 204 (sin body), lo que tiraba `SyntaxError: Unexpected end of JSON input`. El catch del frontend mostraba "Error al eliminar" pero el delete SÍ se ejecutaba en el backend. El usuario veía un error falso y la UI no se refrescaba.
+**Lección:** Siempre chequear el status code antes de parsear el body de una respuesta HTTP. 204 No Content no tiene body — retornar directamente sin llamar `.json()`. Aplica a todo fetch wrapper genérico.
