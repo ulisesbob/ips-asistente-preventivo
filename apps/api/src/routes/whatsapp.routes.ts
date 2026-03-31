@@ -13,6 +13,25 @@ const whatsappRouter = Router();
 
 // ─── Rate limiter for webhook ────────────────────────────────────────────────
 
+// ─── Message deduplication cache ─────────────────────────────────────────────
+// Meta resends webhooks when the server was down, redeploying, or slow to respond.
+// This cache prevents processing the same message multiple times.
+const processedMessageIds = new Set<string>();
+const MAX_CACHE_SIZE = 5000;
+
+// Cleanup old entries every 10 minutes to prevent memory leak
+setInterval(() => {
+  if (processedMessageIds.size > MAX_CACHE_SIZE) {
+    // Keep only the most recent half
+    const entries = [...processedMessageIds];
+    const toRemove = entries.slice(0, entries.length - MAX_CACHE_SIZE / 2);
+    for (const id of toRemove) {
+      processedMessageIds.delete(id);
+    }
+    console.log(`[WhatsApp] Dedup cache cleaned: ${toRemove.length} entries removed, ${processedMessageIds.size} remaining`);
+  }
+}, 10 * 60 * 1000);
+
 const webhookLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 1000, // Support 500+ concurrent patients
@@ -89,10 +108,16 @@ whatsappRouter.post(
     const messages = parseWebhookPayload(req.body).slice(0, MAX_MESSAGES_PER_WEBHOOK);
 
     if (messages.length > 0) {
-      // Process sequentially per message to preserve order for stateful flows (registration)
       (async () => {
         for (const msg of messages) {
           try {
+            // Deduplicate: Meta resends webhooks when server was down or slow
+            if (processedMessageIds.has(msg.messageId)) {
+              console.log(`[WhatsApp] Duplicate message ${msg.messageId} — skipping`);
+              continue;
+            }
+            processedMessageIds.add(msg.messageId);
+
             await handleIncomingMessage(msg.from, msg.text, msg.displayName);
           } catch (error) {
             console.error(`[WhatsApp] Error procesando mensaje de ${msg.from}:`, error);
