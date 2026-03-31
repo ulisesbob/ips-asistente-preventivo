@@ -5,6 +5,7 @@ import { prisma } from '@ips/db';
 import { config } from './config/env';
 import { app } from './app';
 import { startReminderCron, stopReminderCron } from './services/reminder.service';
+import { startMedicationCron, stopMedicationCron } from './services/medication-cron';
 import { logger } from './utils/logger';
 
 // ─── Server Start ─────────────────────────────────────────────────────────────
@@ -20,8 +21,9 @@ const server = app.listen(PORT, () => {
     aiConfigured: !!config.ANTHROPIC_API_KEY,
   });
 
-  // Start reminder cron after server is ready
+  // Start crons after server is ready
   startReminderCron();
+  startMedicationCron();
 });
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
@@ -29,6 +31,7 @@ const server = app.listen(PORT, () => {
 async function shutdown(signal: string): Promise<void> {
   logger.info(`Shutdown signal received: ${signal}`, { event: 'server_shutdown', signal });
   await stopReminderCron();
+  stopMedicationCron();
   server.close(async () => {
     await prisma.$disconnect();
     logger.info('Server shut down cleanly', { event: 'server_shutdown' });

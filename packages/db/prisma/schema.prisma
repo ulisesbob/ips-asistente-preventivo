@@ -60,9 +60,10 @@ model Doctor {
   role         Role     @default(DOCTOR)
   createdAt    DateTime @default(now()) @db.Timestamptz()
 
-  programs         DoctorProgram[]
-  enrolledPatients PatientProgram[]
-  notes            PatientNote[]
+  programs              DoctorProgram[]
+  enrolledPatients      PatientProgram[]
+  notes                 PatientNote[]
+  medicationReminders   MedicationReminder[]
 
   @@map("doctors")
 }
@@ -96,8 +97,9 @@ model Patient {
   programs      PatientProgram[]
   reminders     Reminder[]
   conversations Conversation[]
-  notes         PatientNote[]
-  surveys       Survey[]
+  notes                PatientNote[]
+  surveys              Survey[]
+  medicationReminders  MedicationReminder[]
 
   // phone already has @unique which creates an index — no separate @@index needed
   @@index([fullName])
@@ -240,4 +242,23 @@ model Survey {
   @@index([patientProgramId])
   @@index([completedAt])
   @@map("surveys")
+}
+
+model MedicationReminder {
+  id             String   @id @default(uuid()) @db.Uuid
+  patientId      String   @db.Uuid
+  doctorId       String   @db.Uuid
+  medicationName String   @db.VarChar(200)
+  dosage         String   @db.VarChar(200)
+  reminderHour   Int      @db.SmallInt
+  reminderMinute Int      @default(0) @db.SmallInt
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @db.Timestamptz()
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor  Doctor  @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+
+  @@index([patientId, active])
+  @@index([active, reminderHour, reminderMinute])
+  @@map("medication_reminders")
 }

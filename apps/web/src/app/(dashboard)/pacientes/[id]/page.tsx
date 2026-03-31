@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { apiGet, apiPost, apiPatch } from '@/lib/api';
+import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import {
@@ -23,6 +23,8 @@ import {
   Send,
   CalendarDays,
   Pencil,
+  Pill,
+  Trash2,
 } from 'lucide-react';
 
 interface PatientDetail {
@@ -75,6 +77,16 @@ interface PatientNoteItem {
   doctor: { id: string; fullName: string };
 }
 
+interface MedReminder {
+  id: string;
+  medicationName: string;
+  dosage: string;
+  reminderHour: number;
+  reminderMinute: number;
+  active: boolean;
+  doctor: { fullName: string };
+}
+
 const STATUS_CONFIG = {
   ACTIVE: { label: 'Activo', icon: Play, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   PAUSED: { label: 'Pausado', icon: Pause, className: 'bg-amber-50 text-amber-700 border-amber-200' },
@@ -104,6 +116,10 @@ export default function PatientDetailPage() {
   const [showEdit, setShowEdit] = useState(false);
   const [editForm, setEditForm] = useState({ fullName: '', phone: '', birthDate: '', gender: '' });
   const [editLoading, setEditLoading] = useState(false);
+  const [meds, setMeds] = useState<MedReminder[]>([]);
+  const [showMedDialog, setShowMedDialog] = useState(false);
+  const [medForm, setMedForm] = useState({ medicationName: '', dosage: '', reminderHour: 8, reminderMinute: 0 });
+  const [medSaving, setMedSaving] = useState(false);
   const [notes, setNotes] = useState<PatientNoteItem[]>([]);
   const [notesPage, setNotesPage] = useState(1);
   const [notesTotal, setNotesTotal] = useState(0);
@@ -164,10 +180,52 @@ export default function PatientDetailPage() {
     }
   }
 
+  const fetchMeds = useCallback(async () => {
+    try {
+      const result = await apiGet<{ reminders: MedReminder[] }>(`/api/patients/${id}/medications`);
+      setMeds(result.reminders);
+    } catch { /* handled */ }
+  }, [id]);
+
+  async function handleCreateMed() {
+    if (!medForm.medicationName.trim() || !medForm.dosage.trim()) return;
+    setMedSaving(true);
+    try {
+      await apiPost(`/api/patients/${id}/medications`, medForm);
+      setShowMedDialog(false);
+      setMedForm({ medicationName: '', dosage: '', reminderHour: 8, reminderMinute: 0 });
+      await fetchMeds();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error');
+    } finally {
+      setMedSaving(false);
+    }
+  }
+
+  async function handleToggleMed(med: MedReminder) {
+    try {
+      await apiPatch(`/api/medication-reminders/${med.id}`, { active: !med.active });
+      await fetchMeds();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error');
+    }
+  }
+
+  async function handleDeleteMed(medId: string) {
+    if (!confirm('¿Eliminar este recordatorio de medicación?')) return;
+    try {
+      await apiDelete(`/api/medication-reminders/${medId}`);
+      await fetchMeds();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error');
+    }
+  }
+
   useEffect(() => {
     fetchPatient();
     fetchNotes(1);
-  }, [fetchPatient, fetchNotes]);
+    fetchMeds();
+  }, [fetchPatient, fetchNotes, fetchMeds]);
 
   async function openEnrollDialog() {
     try {
@@ -649,6 +707,130 @@ export default function PatientDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Medication reminders */}
+      <div className="bg-white rounded-lg border border-border">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+          <h2 className="text-sm font-medium text-foreground flex items-center gap-2">
+            <Pill className="w-4 h-4" />
+            Recordatorios de medicación ({meds.length})
+          </h2>
+          <button
+            onClick={() => setShowMedDialog(true)}
+            className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" /> Agregar
+          </button>
+        </div>
+        {meds.length === 0 ? (
+          <p className="px-5 py-8 text-sm text-muted-foreground text-center">
+            Sin recordatorios de medicación configurados
+          </p>
+        ) : (
+          <div className="divide-y divide-border">
+            {meds.map((med) => (
+              <div key={med.id} className={`px-5 py-3 flex items-center justify-between ${!med.active ? 'opacity-50' : ''}`}>
+                <div>
+                  <span className="text-sm font-medium text-foreground">{med.medicationName}</span>
+                  <span className="text-sm text-muted-foreground ml-2">— {med.dosage}</span>
+                  <span className="text-xs text-muted-foreground ml-3">
+                    ⏰ {String(med.reminderHour).padStart(2, '0')}:{String(med.reminderMinute).padStart(2, '0')} hs
+                  </span>
+                  <span className="text-xs text-muted-foreground ml-2">({med.doctor.fullName})</span>
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => handleToggleMed(med)}
+                    className="text-xs px-2 py-1 rounded border border-input text-muted-foreground hover:bg-accent cursor-pointer"
+                  >
+                    {med.active ? 'Pausar' : 'Activar'}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteMed(med.id)}
+                    className="p-1 rounded text-red-500 hover:bg-red-50 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Medication dialog */}
+      {showMedDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-border p-6 w-full max-w-sm mx-4">
+            <h3 className="text-sm font-semibold text-foreground mb-4">Nuevo recordatorio de medicación</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Medicamento</label>
+                <input
+                  type="text"
+                  value={medForm.medicationName}
+                  onChange={(e) => setMedForm({ ...medForm, medicationName: e.target.value })}
+                  placeholder="Ej: Insulina, Metformina..."
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Dosis</label>
+                <input
+                  type="text"
+                  value={medForm.dosage}
+                  onChange={(e) => setMedForm({ ...medForm, dosage: e.target.value })}
+                  placeholder="Ej: 500mg, 10 unidades..."
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                />
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-xs text-muted-foreground mb-1">Hora</label>
+                  <select
+                    value={medForm.reminderHour}
+                    onChange={(e) => setMedForm({ ...medForm, reminderHour: parseInt(e.target.value) })}
+                    className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                  >
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs text-muted-foreground mb-1">Minutos</label>
+                  <select
+                    value={medForm.reminderMinute}
+                    onChange={(e) => setMedForm({ ...medForm, reminderMinute: parseInt(e.target.value) })}
+                    className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                  >
+                    <option value={0}>:00</option>
+                    <option value={30}>:30</option>
+                  </select>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                El paciente recibirá un mensaje por WhatsApp todos los días a esta hora (Argentina).
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end mt-4">
+              <button
+                onClick={() => setShowMedDialog(false)}
+                className="text-xs px-3 py-2 rounded-md border border-input text-muted-foreground hover:bg-accent cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateMed}
+                disabled={medSaving || !medForm.medicationName.trim() || !medForm.dosage.trim()}
+                className="text-xs px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+              >
+                {medSaving ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notes */}
       <div className="bg-white rounded-lg border border-border">
