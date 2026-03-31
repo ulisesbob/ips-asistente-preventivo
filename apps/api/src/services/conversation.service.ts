@@ -77,9 +77,11 @@ export async function handleIncomingMessage(
       whatsappLinked: true,
       programs: {
         where: { status: PatientProgramStatus.ACTIVE },
-        include: {
+        select: {
+          lastControlDate: true,
+          nextReminderDate: true,
           program: {
-            select: { name: true, centers: true },
+            select: { name: true, centers: true, reminderFrequencyDays: true },
           },
         },
       },
@@ -288,7 +290,9 @@ async function handleChat(
     fullName: string;
     consent: boolean;
     programs: Array<{
-      program: { name: string; centers: unknown };
+      lastControlDate: Date | null;
+      nextReminderDate: Date;
+      program: { name: string; centers: unknown; reminderFrequencyDays: number };
     }>;
   },
   text: string
@@ -299,6 +303,9 @@ async function handleChat(
     programs: patient.programs.map((pp) => ({
       name: pp.program.name,
       centers: pp.program.centers,
+      reminderFrequencyDays: pp.program.reminderFrequencyDays,
+      lastControlDate: pp.lastControlDate,
+      nextReminderDate: pp.nextReminderDate,
     })),
   });
 

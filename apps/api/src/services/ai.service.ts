@@ -13,6 +13,9 @@ interface PatientContext {
   programs: Array<{
     name: string;
     centers: unknown; // JSON from DB
+    reminderFrequencyDays: number;
+    lastControlDate: Date | null;
+    nextReminderDate: Date;
   }>;
 }
 
@@ -58,6 +61,14 @@ export function buildSystemPrompt(patient?: PatientContext): string {
     return `${BASE_RULES}\n\nEl usuario aún no fue identificado. Estás en modo de registro.\n\n${DISCLAIMER}`;
   }
 
+  const formatDateAR = (d: Date | null): string => {
+    if (!d) return 'No registrado';
+    return new Intl.DateTimeFormat('es-AR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      timeZone: 'America/Argentina/Buenos_Aires',
+    }).format(new Date(d));
+  };
+
   const programInfo = patient.programs
     .map((p) => {
       const centers =
@@ -66,7 +77,8 @@ export function buildSystemPrompt(patient?: PatientContext): string {
               .map((c) => `  - ${c.name} (${c.city}): ${c.address}`)
               .join('\n')
           : '  - Sin centros cargados';
-      return `Programa: ${p.name}\nCentros de atención:\n${centers}`;
+      const controlInfo = `Último control: ${formatDateAR(p.lastControlDate)}\nPróximo control: ${formatDateAR(p.nextReminderDate)}\nFrecuencia: cada ${p.reminderFrequencyDays} días`;
+      return `Programa: ${p.name}\n${controlInfo}\nCentros de atención:\n${centers}`;
     })
     .join('\n\n');
 
