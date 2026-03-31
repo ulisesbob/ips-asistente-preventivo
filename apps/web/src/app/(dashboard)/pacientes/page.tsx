@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { apiGet } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import {
   Search,
@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Users,
   Filter,
+  Plus,
 } from 'lucide-react';
 
 interface Patient {
@@ -50,6 +51,10 @@ export default function PacientesPage() {
   const [programId, setProgramId] = useState(searchParams.get('programId') || '');
   const [status, setStatus] = useState(searchParams.get('status') || '');
   const [page, setPage] = useState(Number(searchParams.get('page')) || 1);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newPatient, setNewPatient] = useState({ fullName: '', dni: '', phone: '' });
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   // Debounce search input (400ms)
   useEffect(() => {
@@ -97,6 +102,30 @@ export default function PacientesPage() {
     router.replace(`/pacientes${qs ? `?${qs}` : ''}`, { scroll: false });
   }, [debouncedSearch, programId, status, page, router]);
 
+  async function handleCreatePatient(e: React.FormEvent) {
+    e.preventDefault();
+    setCreateError('');
+    setCreateLoading(true);
+    try {
+      const body: Record<string, string> = {
+        fullName: newPatient.fullName.trim(),
+        dni: newPatient.dni.trim().replace(/\./g, ''),
+      };
+      if (newPatient.phone.trim()) {
+        const phone = newPatient.phone.trim();
+        body.phone = phone.startsWith('+') ? phone : `+${phone}`;
+      }
+      await apiPost('/api/patients', body);
+      setShowCreate(false);
+      setNewPatient({ fullName: '', dni: '', phone: '' });
+      fetchPatients();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Error al crear paciente');
+    } finally {
+      setCreateLoading(false);
+    }
+  }
+
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault();
     setPage(1);
@@ -104,15 +133,83 @@ export default function PacientesPage() {
 
   return (
     <div className="space-y-4">
+      {/* Create patient dialog */}
+      {showCreate && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <form onSubmit={handleCreatePatient} className="bg-white rounded-lg border border-border p-6 w-full max-w-sm mx-4">
+            <h3 className="text-sm font-semibold text-foreground mb-4">Crear paciente</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Nombre completo *</label>
+                <input
+                  type="text"
+                  value={newPatient.fullName}
+                  onChange={(e) => setNewPatient({ ...newPatient, fullName: e.target.value })}
+                  required
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                  placeholder="María García"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">DNI *</label>
+                <input
+                  type="text"
+                  value={newPatient.dni}
+                  onChange={(e) => setNewPatient({ ...newPatient, dni: e.target.value })}
+                  required
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                  placeholder="28456789"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Teléfono (WhatsApp, opcional)</label>
+                <input
+                  type="text"
+                  value={newPatient.phone}
+                  onChange={(e) => setNewPatient({ ...newPatient, phone: e.target.value })}
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                  placeholder="+5493764125878"
+                />
+              </div>
+              {createError && <p className="text-xs text-destructive">{createError}</p>}
+            </div>
+            <div className="flex gap-2 justify-end mt-4">
+              <button
+                type="button"
+                onClick={() => { setShowCreate(false); setCreateError(''); }}
+                className="text-xs px-3 py-2 rounded-md border border-input text-muted-foreground hover:bg-accent cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={createLoading}
+                className="text-xs px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+              >
+                {createLoading ? 'Creando...' : 'Crear'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-foreground flex items-center gap-2">
           <Users className="w-5 h-5" />
           Pacientes
         </h1>
-        <span className="text-sm text-muted-foreground">
-          {data ? `${data.pagination.total} pacientes` : ''}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            {data ? `${data.pagination.total} pacientes` : ''}
+          </span>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="inline-flex items-center gap-1 text-xs px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" /> Crear paciente
+          </button>
+        </div>
       </div>
 
       {/* Filters */}

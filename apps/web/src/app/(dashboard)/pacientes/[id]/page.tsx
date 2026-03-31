@@ -18,6 +18,7 @@ import {
   MessageSquare,
   Shield,
   ShieldOff,
+  Plus,
 } from 'lucide-react';
 
 interface PatientDetail {
@@ -82,6 +83,10 @@ export default function PatientDetailPage() {
   const [patient, setPatient] = useState<PatientDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [showEnroll, setShowEnroll] = useState(false);
+  const [programs, setPrograms] = useState<{ id: string; name: string }[]>([]);
+  const [selectedProgramId, setSelectedProgramId] = useState('');
+  const [enrollLoading, setEnrollLoading] = useState(false);
 
   const fetchPatient = useCallback(async () => {
     try {
@@ -97,6 +102,33 @@ export default function PatientDetailPage() {
   useEffect(() => {
     fetchPatient();
   }, [fetchPatient]);
+
+  async function openEnrollDialog() {
+    try {
+      const data = await apiGet<{ programs: { id: string; name: string }[] }>('/api/programs');
+      const enrolledIds = new Set(patient?.programs.map((pp) => pp.program.id) ?? []);
+      const available = data.programs.filter((p) => !enrolledIds.has(p.id));
+      setPrograms(available);
+      setSelectedProgramId(available[0]?.id ?? '');
+      setShowEnroll(true);
+    } catch {
+      alert('Error al cargar programas');
+    }
+  }
+
+  async function handleEnroll() {
+    if (!selectedProgramId) return;
+    setEnrollLoading(true);
+    try {
+      await apiPost(`/api/patients/${id}/programs`, { programId: selectedProgramId });
+      setShowEnroll(false);
+      await fetchPatient();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al inscribir');
+    } finally {
+      setEnrollLoading(false);
+    }
+  }
 
   async function handleMarkControl(ppId: string) {
     setActionLoading(ppId);
@@ -204,12 +236,57 @@ export default function PatientDetailPage() {
         </div>
       </div>
 
+      {/* Enroll dialog */}
+      {showEnroll && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-border p-6 w-full max-w-sm mx-4">
+            <h3 className="text-sm font-semibold text-foreground mb-4">Inscribir en programa</h3>
+            {programs.length === 0 ? (
+              <p className="text-sm text-muted-foreground mb-4">Ya está inscripto en todos los programas.</p>
+            ) : (
+              <select
+                value={selectedProgramId}
+                onChange={(e) => setSelectedProgramId(e.target.value)}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mb-4"
+              >
+                {programs.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            )}
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowEnroll(false)}
+                className="text-xs px-3 py-2 rounded-md border border-input text-muted-foreground hover:bg-accent cursor-pointer"
+              >
+                Cancelar
+              </button>
+              {programs.length > 0 && (
+                <button
+                  onClick={handleEnroll}
+                  disabled={enrollLoading}
+                  className="text-xs px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+                >
+                  {enrollLoading ? 'Inscribiendo...' : 'Inscribir'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Programs */}
       <div className="bg-white rounded-lg border border-border">
-        <div className="px-5 py-4 border-b border-border">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
           <h2 className="text-sm font-medium text-foreground">
             Programas inscriptos ({patient.programs.length})
           </h2>
+          <button
+            onClick={openEnrollDialog}
+            className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" /> Inscribir
+          </button>
         </div>
         {patient.programs.length === 0 ? (
           <p className="px-5 py-8 text-sm text-muted-foreground text-center">
