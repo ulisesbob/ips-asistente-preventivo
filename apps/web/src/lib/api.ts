@@ -112,6 +112,11 @@ async function apiFetch<T>(
     }
   }
 
+  // 204 No Content — nothing to parse (e.g. DELETE endpoints)
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   const json: ApiResponse<T> = await res.json();
 
   if (json.status === 'error') {
