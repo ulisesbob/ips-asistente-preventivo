@@ -22,7 +22,7 @@ export interface PatientCreateInput {
 
 export interface PatientUpdateInput {
   fullName?: string;
-  phone?: string;
+  phone?: string | null;
   birthDate?: string;
   gender?: Gender;
   consent?: boolean;
@@ -314,7 +314,7 @@ export async function updatePatient(
     where: { id: patientId },
     data: {
       ...(input.fullName !== undefined ? { fullName: input.fullName } : {}),
-      ...(input.phone !== undefined ? { phone: input.phone } : {}),
+      ...(input.phone !== undefined ? { phone: input.phone === '' || input.phone === null ? null : input.phone } : {}),
       ...(input.birthDate !== undefined
         ? { birthDate: parseDateOrUndefined(input.birthDate) ?? null }
         : {}),
@@ -607,7 +607,7 @@ export async function exportPatientsCsv(
         [
           escapeCsvField(p.fullName),
           escapeCsvField(p.dni),
-          p.phone || '',
+          escapeCsvField(p.phone || ''),
           '',
           '',
           '',
@@ -620,11 +620,11 @@ export async function exportPatientsCsv(
           [
             escapeCsvField(p.fullName),
             escapeCsvField(p.dni),
-            p.phone || '',
+            escapeCsvField(p.phone || ''),
             escapeCsvField(pp.program.name),
             formatDateAR(pp.lastControlDate),
             formatDateAR(pp.nextReminderDate),
-            pp.status,
+            escapeCsvField(pp.status),
           ].join(',')
         );
       }

@@ -49,8 +49,11 @@ const createBodySchema = z.object({
 const updateBodySchema = z.object({
   fullName: z.string().min(2, 'fullName debe tener al menos 2 caracteres').max(200, 'fullName no puede superar 200 caracteres').optional(),
   phone: z
-    .string()
-    .regex(/^\+[1-9]\d{1,14}$/, 'Teléfono debe estar en formato E.164')
+    .union([
+      z.string().regex(/^\+[1-9]\d{1,14}$/, 'Teléfono debe estar en formato E.164'),
+      z.literal(''),   // allow empty string to clear phone
+      z.null(),        // allow null to clear phone
+    ])
     .optional(),
   birthDate: z
     .string()

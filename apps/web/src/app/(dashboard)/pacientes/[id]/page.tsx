@@ -242,9 +242,9 @@ export default function PatientDetailPage() {
     if (!patient) return;
     setEditLoading(true);
     try {
-      const body: Record<string, string | undefined> = {};
+      const body: Record<string, string | null | undefined> = {};
       if (editForm.fullName !== patient.fullName) body.fullName = editForm.fullName;
-      if (editForm.phone !== (patient.phone || '')) body.phone = editForm.phone || undefined;
+      if (editForm.phone !== (patient.phone || '')) body.phone = editForm.phone || null;
       if (editForm.birthDate !== (patient.birthDate ? patient.birthDate.slice(0, 10) : '')) body.birthDate = editForm.birthDate || undefined;
       if (editForm.gender !== (patient.gender || '')) body.gender = editForm.gender || undefined;
 

@@ -206,13 +206,32 @@ export default function PacientesPage() {
           </span>
           <button
             onClick={async () => {
-              const params = [programId && `programId=${programId}`, status && `status=${status}`].filter(Boolean).join('&');
-              const url = `/api/patients/export${params ? `?${params}` : ''}`;
+              const params = new URLSearchParams();
+              if (programId) params.set('programId', programId);
+              if (status) params.set('status', status);
+              const url = `/api/patients/export${params.size ? `?${params}` : ''}`;
               try {
-                const res = await fetch(url, {
-                  headers: { Authorization: `Bearer ${getAccessToken()}` },
+                // Use apiGet-style fetch with auth token + 401 retry
+                let token = getAccessToken();
+                let res = await fetch(url, {
+                  headers: token ? { Authorization: `Bearer ${token}` } : {},
                   credentials: 'include',
                 });
+                if (res.status === 401 && token) {
+                  // Try refresh
+                  const refreshRes = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+                  if (refreshRes.ok) {
+                    const json = await refreshRes.json();
+                    if (json.status === 'ok') {
+                      const { setAccessToken } = await import('@/lib/api');
+                      setAccessToken(json.data.accessToken);
+                      res = await fetch(url, {
+                        headers: { Authorization: `Bearer ${json.data.accessToken}` },
+                        credentials: 'include',
+                      });
+                    }
+                  }
+                }
                 if (!res.ok) throw new Error('Error al exportar');
                 const blob = await res.blob();
                 const a = document.createElement('a');
