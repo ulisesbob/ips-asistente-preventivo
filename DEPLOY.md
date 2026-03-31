@@ -35,22 +35,19 @@
 
 ---
 
-## 1. Deploy API en Railway
+## 1. Deploy API en Render
 
-### Opción A: Dockerfile (recomendado)
-1. Crear proyecto Railway con PostgreSQL addon
-2. Conectar repo de GitHub
-3. Railway detecta `Dockerfile` automáticamente
-4. Configurar variables de entorno en Railway dashboard
-5. Deploy automático
+### Dockerfile (activo)
+1. Crear Web Service en Render conectado al repo de GitHub
+2. Render detecta `Dockerfile` automáticamente
+3. Configurar variables de entorno en Render Dashboard → Environment
+4. DB: Neon PostgreSQL (externo, no addon de Render)
+5. Deploy automático en cada push a `main`
 
-### Opción B: Nixpacks (sin Docker)
-Configurar en Railway:
-- **Build command:** `npm ci && npx prisma generate --schema=packages/db/prisma/schema.prisma && npm run build -w @ips/db && npm run build -w @ips/api`
-- **Start command:** `npx prisma migrate deploy --schema=packages/db/prisma/schema.prisma && node apps/api/dist/index.js`
+**Nota:** Render Free duerme containers después de 15 min de inactividad (~50s cold start). Para producción real, usar plan Starter ($7/mes).
 
 ### Seed producción
-Después del primer deploy, ejecutar:
+Después del primer deploy, ejecutar en Render Shell:
 ```bash
 ADMIN_PASSWORD=TuPasswordSeguro123! npm run db:seed:prod
 ```

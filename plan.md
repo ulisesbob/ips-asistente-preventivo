@@ -81,3 +81,39 @@ Cada paso depende del anterior. No saltar pasos.
 - [ ] Test: registrar por bot → ver en panel → marcar control → verificar recordatorio (requiere deploy activo)
 
 **Nota:** Los items sin marcar requieren URLs de producción activas y acceso a Meta Business Manager. La infraestructura de deploy (Dockerfile, CI/CD, scripts, monitoreo, SLOs) está completa.
+
+---
+
+### Paso 11 — Notas operativas del paciente
+- [ ] Nueva tabla `patient_notes` (id, patientId, doctorId, content, createdAt)
+- [ ] API: POST /api/patients/:id/notes, GET /api/patients/:id/notes
+- [ ] Validación: max 500 chars, sanitizar contra CSV injection
+- [ ] Panel: sección "Notas" en ficha del paciente con formulario y listado
+- [ ] Bot: incluir últimas 3 notas operativas en el system prompt
+- [ ] Permisos: ADMIN ve todas, DOCTOR solo las de sus programas
+
+### Paso 12 — Próximo control editable
+- [ ] API: PATCH /api/patient-programs/:id/next-control con fecha manual
+- [ ] Validación: fecha debe ser futura, no más de 2 años
+- [ ] Panel: botón "Cambiar fecha" al lado de "Próximo recordatorio" en ficha paciente
+- [ ] El cron de recordatorios respeta la fecha manual (ya lo hace, solo cambia el valor)
+
+### Paso 13 — Alertas y pacientes en riesgo
+- [ ] API: GET /api/dashboard/alerts con categorías (vencido, sin respuesta, baja)
+- [ ] Lógica: control vencido >30 días = amarillo, >60 días = rojo
+- [ ] Lógica: 3+ recordatorios sin respuesta = alerta
+- [ ] Lógica: pacientes con consent=false (pidieron BAJA) = alerta
+- [ ] Panel: sección "Alertas" en Dashboard con semáforo y lista de pacientes
+- [ ] Permisos: DOCTOR ve solo alertas de sus programas
+
+### Paso 14 — Exportar datos
+- [ ] API: GET /api/patients/export?format=csv con filtros (programa, status)
+- [ ] Columnas: nombre, DNI, teléfono, programas, último control, próximo control, estado
+- [ ] Sanitización CSV injection en todos los campos exportados (LESSONS #30)
+- [ ] Panel: botón "Exportar CSV" en la lista de pacientes
+
+### Paso 15 — Editar datos del paciente
+- [ ] API: ya existe PATCH /api/patients/:id — verificar que acepta todos los campos
+- [ ] Panel: botón "Editar" en ficha del paciente con dialog para nombre, teléfono, birthDate, gender
+- [ ] Validación: DNI no editable (es la clave de deduplicación), teléfono E.164
+- [ ] Permisos: ADMIN y DOCTOR de los programas del paciente

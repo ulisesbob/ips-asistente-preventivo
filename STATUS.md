@@ -1,10 +1,10 @@
 # Estado del Proyecto
 
 ## Estado actual
-- **Último paso completado:** Paso 10 — Deploy + Test end-to-end (infra de deploy)
-- **Paso actual:** Pendiente deploy real + configuración Meta Business Manager
-- **Bloqueadores:** Necesita: (1) crear proyecto en Railway + conectar repo, (2) importar en Vercel, (3) configurar webhook en Meta Business Manager
-- **Próxima acción:** Deploy real siguiendo DEPLOY.md → seed producción → configurar webhook Meta → test E2E
+- **Último paso completado:** Paso 10 — Deploy en Render + Vercel + WhatsApp bot funcionando
+- **Paso actual:** Paso 11 — Notas operativas del paciente
+- **Bloqueadores:** Ninguno
+- **Próxima acción:** Implementar Paso 11 (tabla patient_notes + API + panel + bot context)
 
 ## Historial
 | Fecha | Paso | Qué se hizo |
@@ -20,3 +20,4 @@
 | 2026-03-30 | 8 | Panel web — Pantallas core: 25 archivos en apps/web/ (8 pages, 13 UI components, 3 lib files, 1 middleware) + 2 archivos API nuevos (dashboard.service.ts, dashboard.routes.ts). Next.js 14 + Tailwind + shadcn/ui (DM Sans font). Pages: Login, Dashboard (stats), Pacientes (tabla con búsqueda/filtros/paginación), Ficha paciente (datos + programas + marcar control + recordatorios + conversaciones), Programas (lista). API: GET /api/dashboard (stats con role-based filtering, Promise.all 6 queries, Date.UTC). Auth: JWT refresh automático, middleware route protection, AuthProvider context. react-doctor 100/100. Code review: fixed response shape mismatches (listPatients pagination, getPatientById missing includes: enrolledByDoctor, reminderFrequencyDays, conversations). Build passed. |
 | 2026-03-30 | 9 | Panel web — Pantallas admin: 2 archivos API nuevos (conversation.routes.ts, conversation-panel.service.ts) + 5 páginas frontend (programas edit, médicos CRUD, importar CSV, conversaciones lista, conversaciones detalle) + layout actualizado con nav items admin (role-based). Programas: dialog edición template/centros/frecuencia (admin only) con accesibilidad. Médicos: tabla + crear/editar/gestionar programas (3 dialogs). Importar CSV: drag&drop + preview 10 filas + validación client-side + nota server-side. Conversaciones: lista con búsqueda debounce + filtro status + paginación, detalle chat con bubbles USER/ASSISTANT/SYSTEM + load more. Code review: fixed 3 CRITICAL (where clause collision LESSONS#10, service layer violation, CSV info note) + 2 IMPORTANT (pagination order bug, search debounce). react-doctor 96/100. Build passed. |
 | 2026-03-30 | 10 | Deploy infra: Dockerfile multi-stage optimizado (node:20-alpine, dumb-init, non-root user, Prisma client copy from builder, bcrypt native compilation, BuildKit cache mounts). scripts/start-api.sh con guard DATABASE_URL + prisma migrate deploy. seed-prod.ts (9 programas + 1 admin, requiere ADMIN_PASSWORD). next.config.js con standalone output + security headers. CI/CD: .github/workflows/ci.yml (build + test + post-deploy health check). Observabilidad: structured JSON logger, request-logger middleware, health endpoints (/health, /health/deep, /health/cron), CronStatus tracking. SLO.md con targets piloto (95% API, 90% bot, 95% cron). DEPLOY.md con guía completa + estimación costos ($6-25 USD/mes). Docker audit: 2 CRITICAL + 3 HIGH fixed (Prisma CLI en prod, bcrypt native, cache clean, chown). Code review passed. Build passed. |
+| 2026-03-30 | 10+ | Deploy real en Render (API) + Vercel (Panel) + WhatsApp bot. Bugs encontrados y arreglados: (1) números argentinos 549→54 en WhatsApp Cloud API (LESSONS #40), (2) token sin permisos en Meta — regenerado, (3) redirect loop middleware↔layout con cookie expirado (LESSONS #41), (4) botones faltantes en panel: "Crear paciente" y "Inscribir en programa" agregados. Bot ahora incluye fechas de control en system prompt. Verificación E2E con Playwright: login, crear paciente, inscribir en Diabetes, marcar control — todo OK en producción. |
