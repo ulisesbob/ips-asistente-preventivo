@@ -102,6 +102,7 @@ export default function PatientDetailPage() {
   const [notesPages, setNotesPages] = useState(0);
   const [noteContent, setNoteContent] = useState('');
   const [noteSubmitting, setNoteSubmitting] = useState(false);
+  const [notesLoading, setNotesLoading] = useState(false);
 
   const fetchPatient = useCallback(async () => {
     try {
@@ -117,6 +118,8 @@ export default function PatientDetailPage() {
   const [notesError, setNotesError] = useState<string | null>(null);
 
   const fetchNotes = useCallback(async (page = 1) => {
+    if (notesLoading) return;
+    setNotesLoading(true);
     try {
       setNotesError(null);
       const result = await apiGet<{
@@ -133,8 +136,10 @@ export default function PatientDetailPage() {
       setNotesPages(result.pagination.pages);
     } catch (err) {
       setNotesError(err instanceof Error ? err.message : 'Error al cargar notas');
+    } finally {
+      setNotesLoading(false);
     }
-  }, [id]);
+  }, [id, notesLoading]);
 
   async function handleSubmitNote() {
     const trimmed = noteContent.trim();
@@ -526,9 +531,10 @@ export default function PatientDetailPage() {
               <div className="px-5 py-3 text-center">
                 <button
                   onClick={() => fetchNotes(notesPage + 1)}
-                  className="text-xs text-primary hover:underline cursor-pointer"
+                  disabled={notesLoading}
+                  className="text-xs text-primary hover:underline cursor-pointer disabled:opacity-50"
                 >
-                  Cargar más notas
+                  {notesLoading ? 'Cargando...' : 'Cargar más notas'}
                 </button>
               </div>
             )}

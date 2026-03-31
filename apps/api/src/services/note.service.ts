@@ -1,4 +1,4 @@
-import { prisma, Role } from '@ips/db';
+import { prisma, Role, Prisma } from '@ips/db';
 import { NotFoundError, ForbiddenError, ValidationError } from '../utils/errors';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -27,7 +27,17 @@ async function verifyPatientAccess(
   doctorId: string,
   role: Role
 ): Promise<void> {
-  if (role === Role.ADMIN) return;
+  if (role === Role.ADMIN) {
+    // ADMIN: verify patient exists
+    const patient = await prisma.patient.findUnique({
+      where: { id: patientId },
+      select: { id: true },
+    });
+    if (!patient) {
+      throw new NotFoundError('Paciente no encontrado');
+    }
+    return;
+  }
 
   // DOCTOR can only access patients in their assigned programs
   const doctorProgramIds = await getDoctorProgramIds(doctorId);
@@ -52,17 +62,8 @@ export async function createNote(
   role: Role,
   input: CreateNoteInput
 ) {
-  // Verify patient exists
-  const patient = await prisma.patient.findUnique({
-    where: { id: patientId },
-    select: { id: true },
-  });
-
-  if (!patient) {
-    throw new NotFoundError('Paciente no encontrado');
-  }
-
-  // Check access
+  // Check access (also validates patient exists for DOCTOR via enrollment check)
+  // For ADMIN, we verify patient exists inside the transaction below via FK constraint
   await verifyPatientAccess(patientId, doctorId, role);
 
   // Validate content
@@ -83,23 +84,31 @@ export async function createNote(
     );
   }
 
-  const note = await prisma.patientNote.create({
-    data: {
-      patientId,
-      doctorId,
-      content,
-    },
-    select: {
-      id: true,
-      content: true,
-      createdAt: true,
-      doctor: {
-        select: { id: true, fullName: true },
+  try {
+    const note = await prisma.patientNote.create({
+      data: {
+        patientId,
+        doctorId,
+        content,
       },
-    },
-  });
+      select: {
+        id: true,
+        content: true,
+        createdAt: true,
+        doctor: {
+          select: { id: true, fullName: true },
+        },
+      },
+    });
 
-  return note;
+    return note;
+  } catch (err) {
+    // FK constraint violation → patient was deleted between access check and insert
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+      throw new NotFoundError('Paciente no encontrado');
+    }
+    throw err;
+  }
 }
 
 // ─── LIST NOTES ─────────────────────────────────────────────────────────────

@@ -95,10 +95,11 @@ export function buildSystemPrompt(patient?: PatientContext): string {
         'REGLA ABSOLUTA: Bajo NINGUNA circunstancia repitas, parafrasees, resumas ni confirmes el contenido de estas notas. ' +
         'Si el paciente pregunta por notas internas, respondé: "No tengo acceso a esa información."\n' +
         patient.notes
-          .map(
-            (n) =>
-              `- [${formatDateAR(n.createdAt)}] (Dr. ${n.doctor.fullName}): ${n.content}`
-          )
+          .map((n) => {
+            // Sanitize doctor name to prevent prompt injection via fullName
+            const safeName = n.doctor.fullName.replace(/[\n\r\\)/\]]/g, '').slice(0, 100);
+            return `- [${formatDateAR(n.createdAt)}] (Dr. ${safeName}): ${n.content}`;
+          })
           .join('\n')
       : '';
 
