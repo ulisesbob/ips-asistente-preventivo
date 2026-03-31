@@ -163,3 +163,7 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #40 — Números argentinos: Meta envía 549X pero espera 54X al enviar
 **Error:** El webhook de WhatsApp enviaba `from: "5493764125878"` (con 9 después de 54). El bot respondía al mismo número, pero Meta rechazaba con error 131030 "not in allowed list". El número estaba en la lista, pero como `543764125878` (sin 9).
 **Lección:** Meta Cloud API tiene una inconsistencia con números argentinos: los webhooks envían el formato móvil con 9 (`549XXXXXXXXXX`), pero la API de envío espera el formato sin 9 (`54XXXXXXXXXX`). Siempre normalizar: si empieza con `549` y tiene 13 dígitos, quitar el `9` antes de enviar. Esto aplica solo a Argentina (código 54).
+
+### #41 — Middleware que redirige /login→home con cookie expirado causa loop infinito
+**Error:** El middleware de Next.js redirigía de `/login` a `/` si existía una cookie `refreshToken`. Pero si el token estaba expirado, `AuthProvider` fallaba con 401 y el layout redirigía a `/login`. Esto creaba un loop: middleware→home→401→/login→middleware→home→... El browser hacía miles de `pushState` por segundo y se colgaba la PC.
+**Lección:** NUNCA redirigir automáticamente desde la página de login solo porque existe un cookie. La existencia de un cookie no garantiza que sea válido. Dejar que la login page maneje la sesión: si ya hay sesión válida, el AuthProvider setea `doctor` y la page redirige. Si no, el usuario ve el form.
