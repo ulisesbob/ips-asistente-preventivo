@@ -2,13 +2,34 @@
 
 import { useEffect, useState } from 'react';
 import { apiGet } from '@/lib/api';
+import { useRouter } from 'next/navigation';
 import {
   Users,
   Bell,
   Activity,
   TrendingUp,
   Calendar,
+  AlertTriangle,
+  AlertCircle,
+  PhoneOff,
+  MessageSquareOff,
 } from 'lucide-react';
+
+interface AlertPatient {
+  id: string;
+  fullName: string;
+  dni: string;
+  programName: string;
+  daysOverdue?: number;
+  missedReminders?: number;
+}
+
+interface DashboardAlerts {
+  overdueWarning: AlertPatient[];
+  overdueCritical: AlertPatient[];
+  noResponse: AlertPatient[];
+  optedOut: AlertPatient[];
+}
 
 interface DashboardStats {
   totalPatients: number;
@@ -44,14 +65,20 @@ function StatCard({
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [alerts, setAlerts] = useState<DashboardAlerts | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiGet<DashboardStats>('/api/dashboard')
-      .then(setStats)
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    Promise.all([
+      apiGet<DashboardStats>('/api/dashboard').catch(() => null),
+      apiGet<DashboardAlerts>('/api/dashboard/alerts').catch(() => null),
+    ]).then(([s, a]) => {
+      if (s) setStats(s);
+      if (a) setAlerts(a);
+      setLoading(false);
+    });
   }, []);
 
   if (loading) {
@@ -106,6 +133,112 @@ export default function DashboardPage() {
           sub="últimos 30 días"
         />
       </div>
+
+      {/* Alerts */}
+      {alerts && (alerts.overdueCritical.length > 0 || alerts.overdueWarning.length > 0 || alerts.noResponse.length > 0 || alerts.optedOut.length > 0) && (
+        <div className="space-y-4">
+          <h2 className="text-sm font-medium text-foreground flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            Alertas
+          </h2>
+
+          {/* Critical — overdue >60 days */}
+          {alerts.overdueCritical.length > 0 && (
+            <div className="bg-white rounded-lg border border-red-200">
+              <div className="px-5 py-3 border-b border-red-100 bg-red-50/50">
+                <h3 className="text-xs font-medium text-red-700 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Control vencido &gt;60 días ({alerts.overdueCritical.length})
+                </h3>
+              </div>
+              <div className="divide-y divide-border">
+                {alerts.overdueCritical.map((p) => (
+                  <button key={`crit-${p.id}-${p.programName}`} onClick={() => router.push(`/pacientes/${p.id}`)} className="w-full px-5 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 cursor-pointer">
+                    <div className="text-sm">
+                      <span className="text-foreground font-medium">{p.fullName}</span>
+                      <span className="text-muted-foreground ml-2">DNI {p.dni}</span>
+                      <span className="text-muted-foreground ml-2">— {p.programName}</span>
+                    </div>
+                    <span className="text-xs font-medium text-red-600">{p.daysOverdue} días</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Warning — overdue >30 days */}
+          {alerts.overdueWarning.length > 0 && (
+            <div className="bg-white rounded-lg border border-amber-200">
+              <div className="px-5 py-3 border-b border-amber-100 bg-amber-50/50">
+                <h3 className="text-xs font-medium text-amber-700 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Control vencido &gt;30 días ({alerts.overdueWarning.length})
+                </h3>
+              </div>
+              <div className="divide-y divide-border">
+                {alerts.overdueWarning.map((p) => (
+                  <button key={`warn-${p.id}-${p.programName}`} onClick={() => router.push(`/pacientes/${p.id}`)} className="w-full px-5 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 cursor-pointer">
+                    <div className="text-sm">
+                      <span className="text-foreground font-medium">{p.fullName}</span>
+                      <span className="text-muted-foreground ml-2">DNI {p.dni}</span>
+                      <span className="text-muted-foreground ml-2">— {p.programName}</span>
+                    </div>
+                    <span className="text-xs font-medium text-amber-600">{p.daysOverdue} días</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* No response — 3+ reminders */}
+          {alerts.noResponse.length > 0 && (
+            <div className="bg-white rounded-lg border border-orange-200">
+              <div className="px-5 py-3 border-b border-orange-100 bg-orange-50/50">
+                <h3 className="text-xs font-medium text-orange-700 flex items-center gap-1.5">
+                  <MessageSquareOff className="w-3.5 h-3.5" />
+                  Sin respuesta a recordatorios ({alerts.noResponse.length})
+                </h3>
+              </div>
+              <div className="divide-y divide-border">
+                {alerts.noResponse.map((p) => (
+                  <button key={`nr-${p.id}`} onClick={() => router.push(`/pacientes/${p.id}`)} className="w-full px-5 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 cursor-pointer">
+                    <div className="text-sm">
+                      <span className="text-foreground font-medium">{p.fullName}</span>
+                      <span className="text-muted-foreground ml-2">DNI {p.dni}</span>
+                      <span className="text-muted-foreground ml-2">— {p.programName}</span>
+                    </div>
+                    <span className="text-xs font-medium text-orange-600">{p.missedReminders} sin respuesta</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Opted out */}
+          {alerts.optedOut.length > 0 && (
+            <div className="bg-white rounded-lg border border-slate-200">
+              <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50">
+                <h3 className="text-xs font-medium text-slate-600 flex items-center gap-1.5">
+                  <PhoneOff className="w-3.5 h-3.5" />
+                  Solicitaron baja ({alerts.optedOut.length})
+                </h3>
+              </div>
+              <div className="divide-y divide-border">
+                {alerts.optedOut.map((p) => (
+                  <button key={`out-${p.id}`} onClick={() => router.push(`/pacientes/${p.id}`)} className="w-full px-5 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 cursor-pointer">
+                    <div className="text-sm">
+                      <span className="text-foreground font-medium">{p.fullName}</span>
+                      <span className="text-muted-foreground ml-2">DNI {p.dni}</span>
+                      <span className="text-muted-foreground ml-2">— {p.programName}</span>
+                    </div>
+                    <span className="text-xs text-slate-500">BAJA</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Patients by program */}
       <div className="bg-white rounded-lg border border-border">

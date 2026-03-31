@@ -22,4 +22,21 @@ router.get(
   })
 );
 
+// ─── GET /api/dashboard/alerts ──────────────────────────────────────────────
+
+router.get(
+  '/alerts',
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id, role } = req.doctor!;
+
+    const alerts = await dashboardService.getAlerts(id, role);
+
+    res.status(200).json({
+      status: 'ok',
+      data: alerts,
+    });
+  })
+);
+
 export { router as dashboardRouter };

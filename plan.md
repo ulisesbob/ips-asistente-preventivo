@@ -98,13 +98,13 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Panel: botón "Cambiar fecha" al lado de "Próximo recordatorio" en ficha paciente
 - [x] El cron de recordatorios respeta la fecha manual (ya lo hace, solo cambia el valor)
 
-### Paso 13 — Alertas y pacientes en riesgo
-- [ ] API: GET /api/dashboard/alerts con categorías (vencido, sin respuesta, baja)
-- [ ] Lógica: control vencido >30 días = amarillo, >60 días = rojo
-- [ ] Lógica: 3+ recordatorios sin respuesta = alerta
-- [ ] Lógica: pacientes con consent=false (pidieron BAJA) = alerta
-- [ ] Panel: sección "Alertas" en Dashboard con semáforo y lista de pacientes
-- [ ] Permisos: DOCTOR ve solo alertas de sus programas
+### Paso 13 — Alertas y pacientes en riesgo ✅
+- [x] API: GET /api/dashboard/alerts con categorías (vencido, sin respuesta, baja)
+- [x] Lógica: control vencido >30 días = amarillo, >60 días = rojo
+- [x] Lógica: 3+ recordatorios sin respuesta = alerta
+- [x] Lógica: pacientes con consent=false (pidieron BAJA) = alerta
+- [x] Panel: sección "Alertas" en Dashboard con semáforo y lista de pacientes
+- [x] Permisos: DOCTOR ve solo alertas de sus programas
 
 ### Paso 14 — Exportar datos
 - [ ] API: GET /api/patients/export?format=csv con filtros (programa, status)
