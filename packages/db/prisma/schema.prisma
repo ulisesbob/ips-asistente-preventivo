@@ -97,6 +97,7 @@ model Patient {
   reminders     Reminder[]
   conversations Conversation[]
   notes         PatientNote[]
+  surveys       Survey[]
 
   // phone already has @unique which creates an index — no separate @@index needed
   @@index([fullName])
@@ -128,9 +129,10 @@ model PatientProgram {
   nextReminderDate   DateTime             @db.Date
   status             PatientProgramStatus @default(ACTIVE)
 
-  patient          Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  program          Program @relation(fields: [programId], references: [id], onDelete: Restrict)
-  enrolledByDoctor Doctor  @relation(fields: [enrolledByDoctorId], references: [id], onDelete: Restrict)
+  patient          Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  program          Program  @relation(fields: [programId], references: [id], onDelete: Restrict)
+  enrolledByDoctor Doctor   @relation(fields: [enrolledByDoctorId], references: [id], onDelete: Restrict)
+  surveys          Survey[]
 
   @@unique([patientId, programId])
   @@index([patientId])
@@ -220,4 +222,22 @@ model KnowledgeBase {
   @@index([category, active])
   @@index([active, sortOrder])
   @@map("knowledge_base")
+}
+
+model Survey {
+  id               String    @id @default(uuid()) @db.Uuid
+  patientProgramId String    @db.Uuid
+  patientId        String    @db.Uuid
+  sentAt           DateTime  @default(now()) @db.Timestamptz()
+  attended         Boolean?
+  rating           Int?      @db.SmallInt
+  completedAt      DateTime? @db.Timestamptz()
+
+  patient        Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientProgram PatientProgram @relation(fields: [patientProgramId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([patientProgramId])
+  @@index([completedAt])
+  @@map("surveys")
 }

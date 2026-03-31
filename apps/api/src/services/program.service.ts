@@ -1,5 +1,6 @@
 import { prisma, Role, PatientProgramStatus, Prisma } from '@ips/db';
 import { NotFoundError, ForbiddenError, ConflictError, ValidationError } from '../utils/errors';
+import { scheduleSurvey } from './survey.service';
 
 // ─── Helpers — Prisma error handling ────────────────────────────────────────
 
@@ -279,6 +280,12 @@ export async function markControl(
       program: { select: { id: true, name: true } },
       patient: { select: { id: true, fullName: true } },
     },
+  });
+
+  // Schedule satisfaction survey (sent 24hs later by cron)
+  await scheduleSurvey(patientProgramId, pp.patientId).catch((err) => {
+    console.error('[Survey] Error scheduling survey:', err);
+    // Don't fail the control marking if survey scheduling fails
   });
 
   return updated;

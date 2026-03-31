@@ -134,10 +134,10 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] API: POST /api/conversations/:id/reply (envía mensaje vía WhatsApp desde el panel)
 - [x] Bot: cuando la conversación está ESCALATED, no responde con AI (pasa todo al humano)
 
-### Paso 18 — Encuestas post-control
-- [ ] Crear tabla `surveys` (id, patientProgramId, sentAt, responses JSON, completedAt)
-- [ ] Lógica: cuando el médico marca "control realizado", el bot envía encuesta 24hs después
-- [ ] Encuesta: "¿Pudiste hacer tu control?" (Sí/No) + "¿Cómo te atendieron?" (1-5)
-- [ ] Bot: parsear respuestas y guardar en la tabla
-- [ ] Panel: sección "Encuestas" en dashboard con métricas de satisfacción
-- [ ] API: GET /api/dashboard/surveys (stats de satisfacción)
+### Paso 18 — Encuestas post-control ✅
+- [x] Crear tabla `surveys` (id, patientProgramId, sentAt, responses JSON, completedAt)
+- [x] Lógica: cuando el médico marca "control realizado", el bot envía encuesta 24hs después
+- [x] Encuesta: "¿Pudiste hacer tu control?" (Sí/No) + "¿Cómo te atendieron?" (1-5)
+- [x] Bot: parsear respuestas y guardar en la tabla
+- [x] Panel: sección "Encuestas" en dashboard con métricas de satisfacción
+- [x] API: GET /api/dashboard/surveys (stats de satisfacción)

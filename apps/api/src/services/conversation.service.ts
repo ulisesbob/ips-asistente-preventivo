@@ -9,6 +9,7 @@ import { sendTextMessage } from './whatsapp.service';
 import { generateResponse, buildSystemPrompt, ChatMessage } from './ai.service';
 import { getLatestNotesForBot } from './note.service';
 import { getRelevantKBForBot } from './knowledge.service';
+import { processSurveyResponse } from './survey.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -109,7 +110,16 @@ export async function handleIncomingMessage(
     return;
   }
 
-  // 4. Check if conversation is ESCALATED — don't respond with AI, just save message
+  // 4. Check for pending survey response
+  if (patient && patient.whatsappLinked) {
+    const surveyReply = await processSurveyResponse(patient.id, text);
+    if (surveyReply) {
+      await saveMessageAndReply(normalizedPhone, e164Phone, patient.id, text, surveyReply);
+      return;
+    }
+  }
+
+  // 5. Check if conversation is ESCALATED — don't respond with AI, just save message
   if (patient && patient.whatsappLinked) {
     const activeConv = await prisma.conversation.findFirst({
       where: { phone: e164Phone, status: ConversationStatus.ESCALATED },

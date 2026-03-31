@@ -13,6 +13,8 @@ import {
   AlertCircle,
   PhoneOff,
   MessageSquareOff,
+  Star,
+  ClipboardCheck,
 } from 'lucide-react';
 
 interface AlertPatient {
@@ -29,6 +31,14 @@ interface DashboardAlerts {
   overdueCritical: AlertPatient[];
   noResponse: AlertPatient[];
   optedOut: AlertPatient[];
+}
+
+interface SurveyStats {
+  totalSent: number;
+  totalCompleted: number;
+  attendanceRate: number;
+  averageRating: number;
+  ratingDistribution: { rating: number; count: number }[];
 }
 
 interface DashboardStats {
@@ -68,15 +78,18 @@ export default function DashboardPage() {
   const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [alerts, setAlerts] = useState<DashboardAlerts | null>(null);
+  const [surveyStats, setSurveyStats] = useState<SurveyStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       apiGet<DashboardStats>('/api/dashboard').catch(() => null),
       apiGet<DashboardAlerts>('/api/dashboard/alerts').catch(() => null),
-    ]).then(([s, a]) => {
+      apiGet<SurveyStats>('/api/dashboard/surveys').catch(() => null),
+    ]).then(([s, a, sv]) => {
       if (s) setStats(s);
       if (a) setAlerts(a);
+      if (sv) setSurveyStats(sv);
       setLoading(false);
     });
   }, []);
@@ -237,6 +250,62 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Survey stats */}
+      {surveyStats && surveyStats.totalSent > 0 && (
+        <div className="bg-white rounded-lg border border-border">
+          <div className="px-5 py-4 border-b border-border">
+            <h2 className="text-sm font-medium text-foreground flex items-center gap-2">
+              <ClipboardCheck className="w-4 h-4" />
+              Encuestas de satisfacción
+            </h2>
+          </div>
+          <div className="px-5 py-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+              <div>
+                <span className="text-muted-foreground">Enviadas</span>
+                <p className="text-lg font-semibold">{surveyStats.totalSent}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Completadas</span>
+                <p className="text-lg font-semibold">{surveyStats.totalCompleted}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Asistencia</span>
+                <p className="text-lg font-semibold">{surveyStats.attendanceRate}%</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Calificación</span>
+                <p className="text-lg font-semibold flex items-center gap-1">
+                  <Star className="w-4 h-4 text-amber-500" />
+                  {surveyStats.averageRating}/5
+                </p>
+              </div>
+            </div>
+            {surveyStats.ratingDistribution.length > 0 && (
+              <div className="mt-4 flex gap-2">
+                {[1, 2, 3, 4, 5].map((r) => {
+                  const entry = surveyStats.ratingDistribution.find((d) => d.rating === r);
+                  const count = entry?.count ?? 0;
+                  const maxCount = Math.max(...surveyStats.ratingDistribution.map((d) => d.count), 1);
+                  return (
+                    <div key={r} className="flex-1 text-center">
+                      <div className="h-16 flex items-end justify-center">
+                        <div
+                          className="w-full max-w-[24px] bg-amber-200 rounded-t"
+                          style={{ height: `${(count / maxCount) * 100}%`, minHeight: count > 0 ? '4px' : '0' }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{r}★</p>
+                      <p className="text-xs font-medium">{count}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

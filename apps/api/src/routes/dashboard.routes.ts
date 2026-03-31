@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error-handler';
 import * as dashboardService from '../services/dashboard.service';
+import * as surveyService from '../services/survey.service';
 
 const router = Router();
 
@@ -35,6 +36,23 @@ router.get(
     res.status(200).json({
       status: 'ok',
       data: alerts,
+    });
+  })
+);
+
+// ─── GET /api/dashboard/surveys ──────────────────────────────────────────────
+
+router.get(
+  '/surveys',
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id, role } = req.doctor!;
+
+    const stats = await surveyService.getSurveyStats(id, role);
+
+    res.status(200).json({
+      status: 'ok',
+      data: stats,
     });
   })
 );
