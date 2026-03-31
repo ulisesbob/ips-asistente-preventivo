@@ -88,11 +88,13 @@ export function parseWebhookPayload(body: WebhookPayload): IncomingMessage[] {
 // This is a known Meta inconsistency for Argentina (country code 54).
 
 function normalizePhoneForSend(phone: string): string {
-  // Argentine mobile: 549 + 10 digits → 54 + 10 digits
-  if (phone.startsWith('549') && phone.length === 13) {
-    return '54' + phone.slice(3);
+  // Strip + prefix if present (DB stores with +, Meta API expects without)
+  let p = phone.startsWith('+') ? phone.slice(1) : phone;
+  // Argentine mobile: 549 + 10 digits → 54 + 10 digits (LESSONS #40)
+  if (p.startsWith('549') && p.length === 13) {
+    return '54' + p.slice(3);
   }
-  return phone;
+  return p;
 }
 
 // ─── Send Text Message ────────────────────────────────────────────────────────

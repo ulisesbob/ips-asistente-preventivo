@@ -10,6 +10,7 @@ import { generateResponse, buildSystemPrompt, ChatMessage } from './ai.service';
 import { getLatestNotesForBot } from './note.service';
 import { getRelevantKBForBot } from './knowledge.service';
 import { processSurveyResponse } from './survey.service';
+import { getMedicationsForBot } from './medication-reminder.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -347,10 +348,11 @@ async function handleChat(
   },
   text: string
 ): Promise<void> {
-  // Fetch context for AI: notes + relevant knowledge base
-  const [notes, kbEntries] = await Promise.all([
+  // Fetch context for AI: notes + KB + medications
+  const [notes, kbEntries, medications] = await Promise.all([
     getLatestNotesForBot(patient.id),
     getRelevantKBForBot(text),
+    getMedicationsForBot(patient.id),
   ]);
 
   // Build system prompt with patient context + notes
@@ -365,6 +367,7 @@ async function handleChat(
     })),
     notes,
     knowledgeBase: kbEntries,
+    medications,
   });
 
   // Debug: log what the AI will see

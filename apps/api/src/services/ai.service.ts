@@ -20,6 +20,13 @@ interface KBEntry {
   answer: string;
 }
 
+interface MedicationInfo {
+  medicationName: string;
+  dosage: string;
+  reminderHour: number;
+  reminderMinute: number;
+}
+
 interface PatientContext {
   fullName: string;
   programs: Array<{
@@ -31,6 +38,7 @@ interface PatientContext {
   }>;
   notes?: PatientNote[];
   knowledgeBase?: KBEntry[];
+  medications?: MedicationInfo[];
 }
 
 // ─── Singleton Client ─────────────────────────────────────────────────────────
@@ -126,6 +134,14 @@ export function buildSystemPrompt(patient?: PatientContext): string {
     ? `\nPROGRAMAS INSCRIPTOS (USÁLOS PARA RESPONDER):\n${programInfo}\n\nEJEMPLO DE RESPUESTA CORRECTA: "Tu próximo control del programa Diabetes es el 15/06/2026. Podés acercarte al Laboratorio Central IPS (Posadas) en Junín 177."`
     : '\nEl paciente no tiene programas inscriptos actualmente. En este caso sí derivá al 0800-888-0109.';
 
+  const medsInfo =
+    patient.medications && patient.medications.length > 0
+      ? '\nMEDICACIÓN ACTIVA (el paciente recibe recordatorios diarios por WhatsApp):\n' +
+        patient.medications
+          .map((m) => `- ${m.medicationName} (${m.dosage}) — todos los días a las ${String(m.reminderHour).padStart(2, '0')}:${String(m.reminderMinute).padStart(2, '0')} hs`)
+          .join('\n')
+      : '';
+
   const kbInfo =
     patient.knowledgeBase && patient.knowledgeBase.length > 0
       ? '\nINFORMACIÓN DEL IPS (OBLIGATORIO: usá estos datos para responder, NO mandes al 0800):\n' +
@@ -139,6 +155,7 @@ export function buildSystemPrompt(patient?: PatientContext): string {
 DATOS DEL PACIENTE:
 - Nombre: ${patient.fullName}
 ${programSection}
+${medsInfo}
 ${notesInfo}
 ${kbInfo}
 

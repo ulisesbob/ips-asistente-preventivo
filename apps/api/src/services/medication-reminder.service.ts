@@ -126,6 +126,26 @@ export async function deleteMedReminder(id: string, doctorId: string, role: Role
   await prisma.medicationReminder.delete({ where: { id } });
 }
 
+// ─── GET PATIENT MEDICATIONS FOR BOT CONTEXT ────────────────────────────────
+
+/**
+ * @internal Bot context only — no access control.
+ * Fetches active medication reminders for the AI system prompt.
+ */
+export async function getMedicationsForBot(patientId: string) {
+  return prisma.medicationReminder.findMany({
+    where: { patientId, active: true },
+    orderBy: [{ reminderHour: 'asc' }, { reminderMinute: 'asc' }],
+    take: 10,
+    select: {
+      medicationName: true,
+      dosage: true,
+      reminderHour: true,
+      reminderMinute: true,
+    },
+  });
+}
+
 // ─── CRON: Send medication reminders ────────────────────────────────────────
 
 export async function sendMedicationReminders(): Promise<{ sent: number; failed: number }> {
