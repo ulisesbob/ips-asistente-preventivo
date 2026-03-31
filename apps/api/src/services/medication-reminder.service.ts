@@ -92,9 +92,10 @@ export async function createMedReminder(
 
 // ─── UPDATE ─────────────────────────────────────────────────────────────────
 
-export async function updateMedReminder(id: string, input: UpdateMedReminderInput) {
-  const existing = await prisma.medicationReminder.findUnique({ where: { id }, select: { id: true } });
+export async function updateMedReminder(id: string, doctorId: string, role: Role, input: UpdateMedReminderInput) {
+  const existing = await prisma.medicationReminder.findUnique({ where: { id }, select: { id: true, patientId: true } });
   if (!existing) throw new NotFoundError('Recordatorio no encontrado');
+  await verifyPatientAccess(existing.patientId, doctorId, role);
 
   return prisma.medicationReminder.update({
     where: { id },
@@ -118,31 +119,35 @@ export async function updateMedReminder(id: string, input: UpdateMedReminderInpu
 
 // ─── DELETE ─────────────────────────────────────────────────────────────────
 
-export async function deleteMedReminder(id: string) {
-  const existing = await prisma.medicationReminder.findUnique({ where: { id }, select: { id: true } });
+export async function deleteMedReminder(id: string, doctorId: string, role: Role) {
+  const existing = await prisma.medicationReminder.findUnique({ where: { id }, select: { id: true, patientId: true } });
   if (!existing) throw new NotFoundError('Recordatorio no encontrado');
+  await verifyPatientAccess(existing.patientId, doctorId, role);
   await prisma.medicationReminder.delete({ where: { id } });
 }
 
 // ─── CRON: Send medication reminders ────────────────────────────────────────
 
 export async function sendMedicationReminders(): Promise<{ sent: number; failed: number }> {
-  // Get current hour in Argentina (UTC-3)
-  const now = new Date();
-  const argentinaOffset = -3;
-  const argHour = (now.getUTCHours() + argentinaOffset + 24) % 24;
-  const argMinute = now.getUTCMinutes();
+  // Cron fires with timezone 'America/Argentina/Buenos_Aires' so we use
+  // Intl to get the current Argentina hour/minute (LESSONS #16: don't mix conventions)
+  const argFormatter = new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric', minute: 'numeric', hour12: false,
+    timeZone: 'America/Argentina/Buenos_Aires',
+  });
+  const parts = argFormatter.formatToParts(new Date());
+  const argHour = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const argMinute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0');
 
-  // Round to nearest 30-min slot (0 or 30)
-  const slot = argMinute < 15 ? 0 : argMinute < 45 ? 30 : 0;
-  const effectiveHour = slot === 0 && argMinute >= 45 ? (argHour + 1) % 24 : argHour;
+  // Match the slot: cron fires at :00 and :30, so match exactly
+  const slot = argMinute < 15 ? 0 : 30;
 
-  console.log(`[MedReminder] Checking for hour=${effectiveHour} minute=${slot} (Argentina)`);
+  console.log(`[MedReminder] Checking for hour=${argHour} minute=${slot} (Argentina)`);
 
   const reminders = await prisma.medicationReminder.findMany({
     where: {
       active: true,
-      reminderHour: effectiveHour,
+      reminderHour: argHour,
       reminderMinute: slot,
       patient: {
         consent: true,

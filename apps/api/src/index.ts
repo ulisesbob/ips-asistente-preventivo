@@ -6,6 +6,7 @@ import { config } from './config/env';
 import { app } from './app';
 import { startReminderCron, stopReminderCron } from './services/reminder.service';
 import { startMedicationCron, stopMedicationCron } from './services/medication-cron';
+import { startSurveyCron, stopSurveyCron } from './services/survey-cron';
 import { logger } from './utils/logger';
 
 // ─── Server Start ─────────────────────────────────────────────────────────────
@@ -24,6 +25,7 @@ const server = app.listen(PORT, () => {
   // Start crons after server is ready
   startReminderCron();
   startMedicationCron();
+  startSurveyCron();
 });
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
@@ -32,6 +34,7 @@ async function shutdown(signal: string): Promise<void> {
   logger.info(`Shutdown signal received: ${signal}`, { event: 'server_shutdown', signal });
   await stopReminderCron();
   stopMedicationCron();
+  stopSurveyCron();
   server.close(async () => {
     await prisma.$disconnect();
     logger.info('Server shut down cleanly', { event: 'server_shutdown' });

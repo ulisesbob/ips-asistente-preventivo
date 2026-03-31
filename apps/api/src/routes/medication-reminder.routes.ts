@@ -75,7 +75,7 @@ router.patch(
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params as z.infer<typeof idSchema>;
     const body = req.body as z.infer<typeof updateSchema>;
-    const reminder = await medService.updateMedReminder(id, body);
+    const reminder = await medService.updateMedReminder(id, req.doctor!.id, req.doctor!.role as Role, body);
     res.status(200).json({ status: 'ok', data: { reminder } });
   })
 );
@@ -88,7 +88,7 @@ router.delete(
   validate(idSchema, 'params'),
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params as z.infer<typeof idSchema>;
-    await medService.deleteMedReminder(id);
+    await medService.deleteMedReminder(id, req.doctor!.id, req.doctor!.role as Role);
     res.status(204).send();
   })
 );

@@ -18,12 +18,22 @@ const E164_PHONE_REGEX = /^\d{7,15}$/;
 const REGISTRATION_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_HISTORY_FOR_DB = 20; // Align with AI service MAX_HISTORY_MESSAGES
 
-// Escalation keywords — patient wants to talk to a human
+// Escalation keywords — patient wants to talk to a human (pre-normalized, no accents)
 const ESCALATION_KEYWORDS = [
   'operador', 'operadora', 'hablar con alguien', 'persona real',
   'quiero hablar', 'agente', 'humano', 'atencion humana',
   'necesito ayuda', 'no me sirve', 'reclamar', 'reclamo', 'queja',
 ];
+
+// Shared phone normalization for Argentina (LESSONS #40)
+function toSendablePhone(phone: string): string {
+  let p = phone.startsWith('+') ? phone.slice(1) : phone;
+  // Argentina: 549 → 54 (Meta sends 549 but expects 54 for sending)
+  if (p.startsWith('549') && p.length === 13) {
+    p = '54' + p.slice(3);
+  }
+  return p;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -110,16 +120,7 @@ export async function handleIncomingMessage(
     return;
   }
 
-  // 4. Check for pending survey response
-  if (patient && patient.whatsappLinked) {
-    const surveyReply = await processSurveyResponse(patient.id, text);
-    if (surveyReply) {
-      await saveMessageAndReply(normalizedPhone, e164Phone, patient.id, text, surveyReply);
-      return;
-    }
-  }
-
-  // 5. Check if conversation is ESCALATED — don't respond with AI, just save message
+  // 4. Check if conversation is ESCALATED — don't respond with AI, just save message
   if (patient && patient.whatsappLinked) {
     const activeConv = await prisma.conversation.findFirst({
       where: { phone: e164Phone, status: ConversationStatus.ESCALATED },
@@ -134,7 +135,14 @@ export async function handleIncomingMessage(
       return;
     }
 
-    // 5. Check for escalation keywords
+    // 5. Check for pending survey response
+    const surveyReply = await processSurveyResponse(patient.id, text);
+    if (surveyReply) {
+      await saveMessageAndReply(normalizedPhone, e164Phone, patient.id, text, surveyReply);
+      return;
+    }
+
+    // 6. Check for escalation keywords
     const textLower = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const wantsHuman = ESCALATION_KEYWORDS.some((kw) => textLower.includes(kw));
 
@@ -194,7 +202,7 @@ async function handleRegistration(
       '¿Cuál es tu nombre completo?';
 
     await saveSystemMessage(e164Phone, null, text, greeting);
-    await sendTextMessage(phone, greeting);
+    await sendTextMessage(toSendablePhone(phone), greeting);
     registrationState.set(phone, { step: 'AWAITING_NAME', createdAt: Date.now() });
     return;
   }
@@ -205,7 +213,7 @@ async function handleRegistration(
 
     if (name.length < 2 || name.length > 200) {
       const retry = 'El nombre debe tener entre 2 y 200 caracteres. ¿Cuál es tu nombre completo?';
-      await sendTextMessage(phone, retry);
+      await sendTextMessage(toSendablePhone(phone), retry);
       return;
     }
 
@@ -213,7 +221,7 @@ async function handleRegistration(
 
     const askDni = `Gracias, ${name}. ¿Cuál es tu número de DNI? (sin puntos)`;
     await saveMessages(e164Phone, null, text, askDni);
-    await sendTextMessage(phone, askDni);
+    await sendTextMessage(toSendablePhone(phone), askDni);
     return;
   }
 
@@ -223,7 +231,7 @@ async function handleRegistration(
 
     if (!DNI_REGEX.test(dni)) {
       const retry = 'El DNI debe tener 7 u 8 dígitos. Por favor, ingresá tu DNI nuevamente:';
-      await sendTextMessage(phone, retry);
+      await sendTextMessage(toSendablePhone(phone), retry);
       return;
     }
 
@@ -259,7 +267,7 @@ async function handleRegistration(
         const rejection =
           'Tu DNI ya está asociado a otro número de WhatsApp. ' +
           'Para modificar tu número, comuníquese al 0800-888-0109.';
-        await sendTextMessage(phone, rejection);
+        await sendTextMessage(toSendablePhone(phone), rejection);
         return;
       }
 
@@ -317,7 +325,7 @@ async function handleRegistration(
     }
 
     await saveMessages(e164Phone, patientId, text, welcome);
-    await sendTextMessage(phone, welcome);
+    await sendTextMessage(toSendablePhone(phone), welcome);
     return;
   }
 }
@@ -414,7 +422,7 @@ async function handleChat(
 
   // Save both messages and send reply
   await saveMessagePair(conversation.id, text, aiResponse);
-  await sendTextMessage(phone, aiResponse);
+  await sendTextMessage(toSendablePhone(phone), aiResponse);
 }
 
 // ─── BAJA Handler ─────────────────────────────────────────────────────────────
@@ -435,7 +443,7 @@ async function handleBaja(
 
   const conversation = await getOrCreateConversation(e164Phone, patientId);
   await saveMessagePair(conversation.id, 'BAJA', message);
-  await sendTextMessage(phone, message);
+  await sendTextMessage(toSendablePhone(phone), message);
 }
 
 // ─── ALTA Handler ─────────────────────────────────────────────────────────────
@@ -456,7 +464,7 @@ async function handleAlta(
 
   const conversation = await getOrCreateConversation(e164Phone, patientId);
   await saveMessagePair(conversation.id, 'ALTA', message);
-  await sendTextMessage(phone, message);
+  await sendTextMessage(toSendablePhone(phone), message);
 }
 
 // ─── Escalation Handler ──────────────────────────────────────────────────────
@@ -481,7 +489,7 @@ async function handleEscalation(
     'Si es urgente, también podés llamar al 0800-888-0109.';
 
   await saveMessagePair(conversation.id, text, message);
-  await sendTextMessage(phone, message);
+  await sendTextMessage(toSendablePhone(phone), message);
 }
 
 // ─── Reply from Panel (operator) ─────────────────────────────────────────────
@@ -500,14 +508,8 @@ export async function sendOperatorReply(
     throw new Error('Conversación no encontrada');
   }
 
-  // Normalize phone for sending (remove + prefix, apply Argentina fix LESSONS #40)
-  let sendPhone = conversation.phone.startsWith('+')
-    ? conversation.phone.slice(1)
-    : conversation.phone;
-
-  // Argentina: 549 → 54 (LESSONS #40)
-  if (sendPhone.startsWith('549') && sendPhone.length === 13) {
-    sendPhone = '54' + sendPhone.slice(3);
+  if (conversation.status !== ConversationStatus.ESCALATED) {
+    throw new Error('Solo se puede responder a conversaciones escaladas');
   }
 
   // Save message as SYSTEM (from operator) and send via WhatsApp
@@ -519,12 +521,25 @@ export async function sendOperatorReply(
     },
   });
 
-  await sendTextMessage(sendPhone, replyText);
+  await sendTextMessage(toSendablePhone(conversation.phone), replyText);
 }
 
 // ─── Close escalated conversation ────────────────────────────────────────────
 
 export async function closeEscalatedConversation(conversationId: string): Promise<void> {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { id: true, status: true },
+  });
+
+  if (!conversation) {
+    throw new Error('Conversación no encontrada');
+  }
+
+  if (conversation.status !== ConversationStatus.ESCALATED) {
+    throw new Error('Solo se puede cerrar conversaciones escaladas');
+  }
+
   await prisma.conversation.update({
     where: { id: conversationId },
     data: { status: ConversationStatus.CLOSED, closedAt: new Date() },
@@ -660,5 +675,5 @@ async function saveMessageAndReply(
 ): Promise<void> {
   const conversation = await getOrCreateConversation(e164Phone, patientId);
   await saveMessagePair(conversation.id, userText, replyText);
-  await sendTextMessage(phone, replyText);
+  await sendTextMessage(toSendablePhone(phone), replyText);
 }
