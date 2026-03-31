@@ -209,7 +209,7 @@ export default function PacientesPage() {
               const params = new URLSearchParams();
               if (programId) params.set('programId', programId);
               if (status) params.set('status', status);
-              const url = `/api/patients/export${params.size ? `?${params}` : ''}`;
+              const url = `/api/patients/export${params.toString() ? `?${params}` : ''}`;
               try {
                 // Use apiGet-style fetch with auth token + 401 retry
                 let token = getAccessToken();

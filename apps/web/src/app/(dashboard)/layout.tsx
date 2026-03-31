@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useAuth } from '@/lib/auth';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -50,8 +51,13 @@ export default function DashboardLayout({
     );
   }
 
+  useEffect(() => {
+    if (!isLoading && !doctor) {
+      router.replace('/login');
+    }
+  }, [isLoading, doctor, router]);
+
   if (!doctor) {
-    router.replace('/login');
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <Activity className="w-6 h-6 animate-pulse text-primary" />

@@ -184,11 +184,9 @@ export default function ConversacionDetallePage() {
               </h1>
               <p className="text-sm text-muted-foreground">
                 {conversation.phone}
-                {conversation.patientName && (
-                  <span className="ml-2">
-                    · Inicio: {formatDateTime(conversation.startedAt)}
-                  </span>
-                )}
+                <span className="ml-2">
+                  · Inicio: {formatDateTime(conversation.startedAt)}
+                </span>
               </p>
             </div>
           </div>
