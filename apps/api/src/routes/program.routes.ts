@@ -45,6 +45,13 @@ const updateStatusBodySchema = z.object({
   status: z.nativeEnum(PatientProgramStatus),
 });
 
+const updateNextControlBodySchema = z.object({
+  nextControlDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'nextControlDate debe estar en formato YYYY-MM-DD')
+    .refine((v) => !isNaN(new Date(v).getTime()), 'Fecha inválida'),
+});
+
 // ─── GET /api/programs ───────────────────────────────────────────────────────
 
 router.get(
@@ -149,6 +156,31 @@ ppRouter.post(
 
     const result = await programService.markControl(
       id,
+      req.doctor!.id,
+      req.doctor!.role as Role
+    );
+
+    res.status(200).json({
+      status: 'ok',
+      data: { patientProgram: result },
+    });
+  })
+);
+
+// ─── PATCH /api/patient-programs/:id/next-control — Cambiar fecha próximo control
+
+ppRouter.patch(
+  '/patient-programs/:id/next-control',
+  requireAuth,
+  validate(patientProgramIdParamsSchema, 'params'),
+  validate(updateNextControlBodySchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params as z.infer<typeof patientProgramIdParamsSchema>;
+    const { nextControlDate } = req.body as z.infer<typeof updateNextControlBodySchema>;
+
+    const result = await programService.updateNextControl(
+      id,
+      nextControlDate,
       req.doctor!.id,
       req.doctor!.role as Role
     );

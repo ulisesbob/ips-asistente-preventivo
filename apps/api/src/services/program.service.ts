@@ -1,5 +1,5 @@
 import { prisma, Role, PatientProgramStatus, Prisma } from '@ips/db';
-import { NotFoundError, ForbiddenError, ConflictError } from '../utils/errors';
+import { NotFoundError, ForbiddenError, ConflictError, ValidationError } from '../utils/errors';
 
 // ─── Helpers — Prisma error handling ────────────────────────────────────────
 
@@ -275,6 +275,55 @@ export async function markControl(
       lastControlDate: today,
       nextReminderDate,
     },
+    include: {
+      program: { select: { id: true, name: true } },
+      patient: { select: { id: true, fullName: true } },
+    },
+  });
+
+  return updated;
+}
+
+// ─── PATCH /patient-programs/:id/next-control — Editar fecha próximo control ─
+
+const MAX_NEXT_CONTROL_YEARS = 2;
+
+export async function updateNextControl(
+  patientProgramId: string,
+  nextControlDate: string,
+  doctorId: string,
+  role: Role
+) {
+  const pp = await verifyPatientProgramAccess(patientProgramId, doctorId, role);
+
+  if (pp.status !== PatientProgramStatus.ACTIVE) {
+    throw new ConflictError('Solo se puede cambiar la fecha en inscripciones activas');
+  }
+
+  // Parse and validate date — use UTC (LESSONS #11)
+  const parsed = new Date(nextControlDate);
+  if (isNaN(parsed.getTime())) {
+    throw new ValidationError('Fecha inválida');
+  }
+
+  const now = new Date();
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dateUTC = new Date(Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()));
+
+  if (dateUTC <= todayUTC) {
+    throw new ValidationError('La fecha debe ser futura');
+  }
+
+  const maxDate = new Date(todayUTC);
+  maxDate.setUTCFullYear(maxDate.getUTCFullYear() + MAX_NEXT_CONTROL_YEARS);
+
+  if (dateUTC > maxDate) {
+    throw new ValidationError(`La fecha no puede superar ${MAX_NEXT_CONTROL_YEARS} años en el futuro`);
+  }
+
+  const updated = await prisma.patientProgram.update({
+    where: { id: patientProgramId },
+    data: { nextReminderDate: dateUTC },
     include: {
       program: { select: { id: true, name: true } },
       patient: { select: { id: true, fullName: true } },

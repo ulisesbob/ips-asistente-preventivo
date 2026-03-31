@@ -92,11 +92,11 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Bot: incluir últimas 3 notas operativas en el system prompt
 - [x] Permisos: ADMIN ve todas, DOCTOR solo las de sus programas
 
-### Paso 12 — Próximo control editable
-- [ ] API: PATCH /api/patient-programs/:id/next-control con fecha manual
-- [ ] Validación: fecha debe ser futura, no más de 2 años
-- [ ] Panel: botón "Cambiar fecha" al lado de "Próximo recordatorio" en ficha paciente
-- [ ] El cron de recordatorios respeta la fecha manual (ya lo hace, solo cambia el valor)
+### Paso 12 — Próximo control editable ✅
+- [x] API: PATCH /api/patient-programs/:id/next-control con fecha manual
+- [x] Validación: fecha debe ser futura, no más de 2 años
+- [x] Panel: botón "Cambiar fecha" al lado de "Próximo recordatorio" en ficha paciente
+- [x] El cron de recordatorios respeta la fecha manual (ya lo hace, solo cambia el valor)
 
 ### Paso 13 — Alertas y pacientes en riesgo
 - [ ] API: GET /api/dashboard/alerts con categorías (vencido, sin respuesta, baja)

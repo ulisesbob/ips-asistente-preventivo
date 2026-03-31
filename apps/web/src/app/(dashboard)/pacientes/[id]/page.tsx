@@ -21,6 +21,7 @@ import {
   Plus,
   StickyNote,
   Send,
+  CalendarDays,
 } from 'lucide-react';
 
 interface PatientDetail {
@@ -96,6 +97,9 @@ export default function PatientDetailPage() {
   const [programs, setPrograms] = useState<{ id: string; name: string }[]>([]);
   const [selectedProgramId, setSelectedProgramId] = useState('');
   const [enrollLoading, setEnrollLoading] = useState(false);
+  const [editDatePpId, setEditDatePpId] = useState<string | null>(null);
+  const [editDateValue, setEditDateValue] = useState('');
+  const [editDateLoading, setEditDateLoading] = useState(false);
   const [notes, setNotes] = useState<PatientNoteItem[]>([]);
   const [notesPage, setNotesPage] = useState(1);
   const [notesTotal, setNotesTotal] = useState(0);
@@ -210,6 +214,28 @@ export default function PatientDetailPage() {
       alert(err instanceof Error ? err.message : 'Error al cambiar estado');
     } finally {
       setActionLoading(null);
+    }
+  }
+
+  function openEditDate(ppId: string, currentDate: string) {
+    // currentDate is ISO string like "2026-04-15T00:00:00.000Z" — extract YYYY-MM-DD
+    setEditDateValue(currentDate.slice(0, 10));
+    setEditDatePpId(ppId);
+  }
+
+  async function handleUpdateNextControl() {
+    if (!editDatePpId || !editDateValue) return;
+    setEditDateLoading(true);
+    try {
+      await apiPatch(`/api/patient-programs/${editDatePpId}/next-control`, {
+        nextControlDate: editDateValue,
+      });
+      setEditDatePpId(null);
+      await fetchPatient();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al cambiar fecha');
+    } finally {
+      setEditDateLoading(false);
     }
   }
 
@@ -333,6 +359,38 @@ export default function PatientDetailPage() {
         </div>
       )}
 
+      {/* Edit next control date dialog */}
+      {editDatePpId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-border p-6 w-full max-w-sm mx-4">
+            <h3 className="text-sm font-semibold text-foreground mb-4">Cambiar fecha de próximo control</h3>
+            <input
+              type="date"
+              value={editDateValue}
+              onChange={(e) => setEditDateValue(e.target.value)}
+              min={new Date(Date.now() + 86400000).toISOString().slice(0, 10)}
+              max={new Date(Date.now() + 2 * 365 * 86400000).toISOString().slice(0, 10)}
+              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mb-4"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setEditDatePpId(null)}
+                className="text-xs px-3 py-2 rounded-md border border-input text-muted-foreground hover:bg-accent cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleUpdateNextControl}
+                disabled={editDateLoading || !editDateValue}
+                className="text-xs px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+              >
+                {editDateLoading ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Programs */}
       <div className="bg-white rounded-lg border border-border">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
@@ -397,6 +455,15 @@ export default function PatientDetailPage() {
                     <div>
                       <span>Próximo recordatorio:</span>{' '}
                       <span className="text-foreground">{formatDate(pp.nextReminderDate)}</span>
+                      {pp.status === 'ACTIVE' && (
+                        <button
+                          onClick={() => openEditDate(pp.id, pp.nextReminderDate)}
+                          className="ml-1 text-primary hover:text-primary/80 cursor-pointer"
+                          title="Cambiar fecha"
+                        >
+                          <CalendarDays className="w-3 h-3 inline" />
+                        </button>
+                      )}
                     </div>
                     <div>
                       <span>Frecuencia:</span>{' '}

@@ -1,10 +1,10 @@
 # Estado del Proyecto
 
 ## Estado actual
-- **Último paso completado:** Paso 11 — Notas operativas del paciente
-- **Paso actual:** Paso 12 — Próximo control editable
+- **Último paso completado:** Paso 12 — Próximo control editable
+- **Paso actual:** Paso 13 — Alertas y pacientes en riesgo
 - **Bloqueadores:** Ninguno
-- **Próxima acción:** Implementar Paso 12 (API PATCH next-control + UI botón cambiar fecha)
+- **Próxima acción:** Implementar Paso 13 (API alerts + UI semáforo en Dashboard)
 
 ## Historial
 | Fecha | Paso | Qué se hizo |
@@ -22,3 +22,4 @@
 | 2026-03-30 | 10 | Deploy infra: Dockerfile multi-stage optimizado (node:20-alpine, dumb-init, non-root user, Prisma client copy from builder, bcrypt native compilation, BuildKit cache mounts). scripts/start-api.sh con guard DATABASE_URL + prisma migrate deploy. seed-prod.ts (9 programas + 1 admin, requiere ADMIN_PASSWORD). next.config.js con standalone output + security headers. CI/CD: .github/workflows/ci.yml (build + test + post-deploy health check). Observabilidad: structured JSON logger, request-logger middleware, health endpoints (/health, /health/deep, /health/cron), CronStatus tracking. SLO.md con targets piloto (95% API, 90% bot, 95% cron). DEPLOY.md con guía completa + estimación costos ($6-25 USD/mes). Docker audit: 2 CRITICAL + 3 HIGH fixed (Prisma CLI en prod, bcrypt native, cache clean, chown). Code review passed. Build passed. |
 | 2026-03-30 | 10+ | Deploy real en Render (API) + Vercel (Panel) + WhatsApp bot. Bugs encontrados y arreglados: (1) números argentinos 549→54 en WhatsApp Cloud API (LESSONS #40), (2) token sin permisos en Meta — regenerado, (3) redirect loop middleware↔layout con cookie expirado (LESSONS #41), (4) botones faltantes en panel: "Crear paciente" y "Inscribir en programa" agregados. Bot ahora incluye fechas de control en system prompt. Verificación E2E con Playwright: login, crear paciente, inscribir en Diabetes, marcar control — todo OK en producción. |
 | 2026-03-31 | 11 | Notas operativas: tabla patient_notes (VarChar 500, FK CASCADE/RESTRICT, indexes patientId+createdAt DESC, doctorId). API: note.service.ts (createNote, listNotes, getLatestNotesForBot) + note.routes.ts (GET/POST /api/patients/:id/notes). Validación: Zod max 500 + CSV injection regex + DB VarChar(500). Permisos: verifyPatientAccess (ADMIN all, DOCTOR via doctor_programs). Bot: últimas 3 notas en system prompt con doble defensa anti-leak (prompt reforzado + filtro server-side post-respuesta). Panel: sección notas en ficha paciente con formulario, disclaimer operativo, char counter, error handling, paginación load-more. Security audit: fixed C1 (prompt injection defense), H1 (VarChar DB constraint), H2 (JSDoc @internal), M1 (rate limit 10/min), M4 (error display). CLAUDE.md actualizado con excepción documentada. react-doctor 99/100. Build passed. |
+| 2026-03-31 | 12 | Próximo control editable: PATCH /api/patient-programs/:id/next-control con Zod YYYY-MM-DD + validación fecha futura + max 2 años + UTC (LESSONS #11). Solo programas ACTIVE (ConflictError si PAUSED/COMPLETED). Permisos via verifyPatientProgramAccess. Panel: botón CalendarDays al lado de "Próximo recordatorio" en ficha paciente (solo ACTIVE), dialog con date input (min tomorrow, max 2 años). react-doctor 99/100. Build passed. |
