@@ -524,7 +524,8 @@ export async function sendOperatorReply(
     },
   });
 
-  await sendTextMessage(toSendablePhone(conversation.phone), replyText);
+  // sendTextMessage already normalizes internally via normalizePhoneForSend
+  await sendTextMessage(conversation.phone, replyText);
 }
 
 // ─── Close escalated conversation ────────────────────────────────────────────

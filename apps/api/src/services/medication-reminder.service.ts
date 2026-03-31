@@ -97,6 +97,14 @@ export async function updateMedReminder(id: string, doctorId: string, role: Role
   if (!existing) throw new NotFoundError('Recordatorio no encontrado');
   await verifyPatientAccess(existing.patientId, doctorId, role);
 
+  // Validate hour/minute ranges (defense in depth — Zod also validates)
+  if (input.reminderHour !== undefined && (input.reminderHour < 0 || input.reminderHour > 23)) {
+    throw new ValidationError('La hora debe ser entre 0 y 23');
+  }
+  if (input.reminderMinute !== undefined && input.reminderMinute !== 0 && input.reminderMinute !== 30) {
+    throw new ValidationError('Los minutos deben ser 0 o 30');
+  }
+
   return prisma.medicationReminder.update({
     where: { id },
     data: {

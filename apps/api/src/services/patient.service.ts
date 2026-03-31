@@ -46,7 +46,8 @@ export interface ImportResult {
 
 function parseDateOrUndefined(value?: string): Date | undefined {
   if (!value) return undefined;
-  const d = new Date(value);
+  // Force UTC midnight to avoid timezone shift (LESSONS #11, #44)
+  const d = new Date(value.includes('T') ? value : value + 'T00:00:00.000Z');
   return isNaN(d.getTime()) ? undefined : d;
 }
 
