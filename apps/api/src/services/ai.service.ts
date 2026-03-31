@@ -207,25 +207,76 @@ export async function generateResponse(
   }
 }
 
+const PRIMARY_MODEL = 'claude-sonnet-4-6';
+const FALLBACK_MODEL = 'claude-haiku-4-5-20251001';
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 2000;
+
+async function callClaude(
+  anthropic: Anthropic,
+  model: string,
+  systemPrompt: string,
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+): Promise<string> {
+  const message = await anthropic.messages.create({
+    model,
+    max_tokens: 512,
+    system: systemPrompt,
+    messages,
+  });
+  const textBlock = message.content.find((block) => block.type === 'text');
+  return textBlock?.text ?? '';
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function _generateResponse(
   systemPrompt: string,
   history: ChatMessage[]
 ): Promise<string> {
   const anthropic = getClient();
-
-  // Limit history to avoid excessive token usage
   const recentHistory = history.slice(-MAX_HISTORY_MESSAGES);
+  const messages = recentHistory.map((m) => ({ role: m.role, content: m.content }));
 
-  const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 512,
-    system: systemPrompt,
-    messages: recentHistory.map((m) => ({
-      role: m.role,
-      content: m.content,
-    })),
-  });
+  // Try Sonnet with retries
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await callClaude(anthropic, PRIMARY_MODEL, systemPrompt, messages);
+      if (response) return response;
+    } catch (err: unknown) {
+      const isOverloaded = err instanceof Error && (
+        err.message.includes('Overloaded') ||
+        err.message.includes('overloaded') ||
+        err.message.includes('529')
+      );
 
-  const textBlock = message.content.find((block) => block.type === 'text');
-  return textBlock?.text ?? 'Lo siento, no pude generar una respuesta. Comuníquese al 0800-888-0109.';
+      if (isOverloaded && attempt < MAX_RETRIES) {
+        console.warn(`[AI] Sonnet overloaded (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${RETRY_DELAY_MS}ms...`);
+        await delay(RETRY_DELAY_MS);
+        continue;
+      }
+
+      // Last Sonnet attempt failed — fall through to Haiku
+      if (isOverloaded) {
+        console.warn('[AI] Sonnet overloaded after retries, falling back to Haiku');
+        break;
+      }
+
+      // Non-overload error — rethrow
+      throw err;
+    }
+  }
+
+  // Fallback to Haiku
+  try {
+    console.log('[AI] Using Haiku fallback');
+    const response = await callClaude(anthropic, FALLBACK_MODEL, systemPrompt, messages);
+    if (response) return response;
+  } catch (err) {
+    console.error('[AI] Haiku fallback also failed:', err);
+  }
+
+  return 'Disculpá, estamos teniendo un problema técnico. Intentá de nuevo en unos minutos.';
 }
