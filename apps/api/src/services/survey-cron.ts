@@ -18,12 +18,12 @@ export function startSurveyCron(): void {
     try {
       const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24h ago
 
-      // Find surveys created >24h ago, not yet completed, for patients with phone + consent
+      // Find surveys created >24h ago, not yet dispatched, for patients with phone + consent
       const pendingSurveys = await prisma.survey.findMany({
         where: {
-          sentAt: { lt: cutoff },
+          createdAt: { lt: cutoff },
+          dispatchedAt: null, // not yet sent
           completedAt: null,
-          attended: null, // not yet answered step 1
           patient: {
             consent: true,
             phone: { not: null },
@@ -74,6 +74,10 @@ export function startSurveyCron(): void {
 
         try {
           await sendTextMessage(sendPhone, message);
+          await prisma.survey.update({
+            where: { id: survey.id },
+            data: { dispatchedAt: new Date() },
+          });
           sent++;
         } catch (err) {
           console.error(`[SurveyCron] Error sending to ${sendPhone}:`, err);

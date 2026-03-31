@@ -230,7 +230,8 @@ model Survey {
   id               String    @id @default(uuid()) @db.Uuid
   patientProgramId String    @db.Uuid
   patientId        String    @db.Uuid
-  sentAt           DateTime  @default(now()) @db.Timestamptz()
+  createdAt        DateTime  @default(now()) @db.Timestamptz()
+  dispatchedAt     DateTime? @db.Timestamptz()
   attended         Boolean?
   rating           Int?      @db.SmallInt
   completedAt      DateTime? @db.Timestamptz()

@@ -35,6 +35,7 @@ export default function ConocimientoPage() {
   const [categories, setCategories] = useState<string[]>([]);
   const [filterCategory, setFilterCategory] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
 
   // Dialog state
@@ -43,11 +44,17 @@ export default function ConocimientoPage() {
   const [form, setForm] = useState({ category: '', question: '', answer: '', sortOrder: 0 });
   const [saving, setSaving] = useState(false);
 
+  // Debounce search (LESSONS #32)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   const fetchData = useCallback(async () => {
     try {
       const params = new URLSearchParams();
       if (filterCategory) params.set('category', filterCategory);
-      if (search) params.set('search', search);
+      if (debouncedSearch) params.set('search', debouncedSearch);
       params.set('page', String(page));
       params.set('activeOnly', 'false');
       const result = await apiGet<KBResponse>(`/api/knowledge?${params}`);
@@ -57,7 +64,7 @@ export default function ConocimientoPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterCategory, search, page]);
+  }, [filterCategory, debouncedSearch, page]);
 
   useEffect(() => {
     fetchData();

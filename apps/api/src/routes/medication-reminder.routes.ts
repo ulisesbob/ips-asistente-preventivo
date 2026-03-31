@@ -22,14 +22,14 @@ const createSchema = z.object({
   medicationName: z.string().min(1, 'Nombre de medicamento requerido').max(200),
   dosage: z.string().min(1, 'Dosis requerida').max(200),
   reminderHour: z.number().int().min(0).max(23),
-  reminderMinute: z.number().int().min(0).max(59).optional().default(0),
+  reminderMinute: z.union([z.literal(0), z.literal(30)]).optional().default(0),
 });
 
 const updateSchema = z.object({
   medicationName: z.string().min(1).max(200).optional(),
   dosage: z.string().min(1).max(200).optional(),
   reminderHour: z.number().int().min(0).max(23).optional(),
-  reminderMinute: z.number().int().min(0).max(59).optional(),
+  reminderMinute: z.union([z.literal(0), z.literal(30)]).optional(),
   active: z.boolean().optional(),
 });
 

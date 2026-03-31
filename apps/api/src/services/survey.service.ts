@@ -34,13 +34,14 @@ export async function processSurveyResponse(
   patientId: string,
   text: string
 ): Promise<string | null> {
-  // Find pending (uncompleted) survey for this patient
+  // Find pending (uncompleted) survey that was ALREADY sent to the patient
   const pending = await prisma.survey.findFirst({
     where: {
       patientId,
       completedAt: null,
+      dispatchedAt: { not: null }, // Only intercept if WA message was actually sent
     },
-    orderBy: { sentAt: 'desc' },
+    orderBy: { dispatchedAt: 'desc' },
     select: {
       id: true,
       attended: true,
@@ -121,7 +122,7 @@ export async function getSurveyStats(
   const [totalSent, totalCompleted, attended, ratings] = await Promise.all([
     prisma.survey.count({ where: programFilter }),
     prisma.survey.count({ where: { ...programFilter, completedAt: { not: null } } }),
-    prisma.survey.count({ where: { ...programFilter, attended: true } }),
+    prisma.survey.count({ where: { ...programFilter, attended: true, completedAt: { not: null } } }),
     prisma.survey.groupBy({
       by: ['rating'],
       where: { ...programFilter, rating: { not: null } },
