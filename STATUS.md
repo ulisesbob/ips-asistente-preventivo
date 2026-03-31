@@ -1,28 +1,93 @@
 # Estado del Proyecto
 
 ## Estado actual
-- **Último paso completado:** Paso 15 — Editar datos del paciente
-- **Paso actual:** Paso 17 — Derivación a humano
+- **Último paso completado:** Paso 18 — Encuestas post-control + Recordatorios de medicación
+- **Paso actual:** TODOS LOS PASOS COMPLETADOS (1-18) + features extras
 - **Bloqueadores:** Ninguno
-- **Próxima acción:** Implementar Paso 17 (ESCALATED status + panel chat + reply WA)
+- **Deploy:** Producción activa en Render (API) + Vercel (Panel)
+- **Bot:** Sonnet 4.6, personalidad "Ana", base de conocimiento con datos reales del IPS
+
+## Features implementadas
+| # | Feature | Estado |
+|---|---------|--------|
+| 1 | Monorepo + config base | ✅ |
+| 2 | Prisma schema + DB (11 tablas) | ✅ |
+| 3 | API Express + Auth JWT | ✅ |
+| 4 | CRUD Pacientes + Deduplicación DNI | ✅ |
+| 5 | Programas + Inscripciones + Control | ✅ |
+| 6 | Webhook WhatsApp + Bot AI | ✅ |
+| 7 | Cron recordatorios (8AM Argentina) | ✅ |
+| 8 | Panel web — Pantallas core | ✅ |
+| 9 | Panel web — Pantallas admin | ✅ |
+| 10 | Deploy Render + Vercel + WhatsApp | ✅ |
+| 11 | Notas operativas del paciente | ✅ |
+| 12 | Próximo control editable | ✅ |
+| 13 | Alertas y pacientes en riesgo | ✅ |
+| 14 | Exportar datos CSV | ✅ |
+| 15 | Editar datos del paciente | ✅ |
+| 16 | Base de conocimiento (30 FAQs reales IPS) | ✅ |
+| 17 | Derivación a humano (escalamiento) | ✅ |
+| 18 | Encuestas post-control | ✅ |
+| — | Recordatorios de medicación diarios | ✅ |
+| — | Bot upgrade a Sonnet 4.6 + personalidad "Ana" | ✅ |
+| — | KB con datos reales de ipsmisiones.com.ar | ✅ |
+
+## Bot — Capacidades
+- Responde preguntas de coberturas, trámites, programas, urgencias (30 FAQs)
+- Da fechas exactas de próximo control y centros de atención
+- Sabe que envía recordatorios automáticos (controles + medicación)
+- Escala a humano cuando el paciente lo pide
+- Hace encuestas de satisfacción post-control
+- Tono: "Ana", secretaria amable del IPS, español argentino
+- Modelo: Claude Sonnet 4.6
+- 0800 solo como último recurso
+
+## Crons activos
+| Cron | Frecuencia | Qué hace |
+|------|-----------|----------|
+| Recordatorios de controles | Diario 8:00 AM Argentina | Envía WA a pacientes con nextReminderDate vencida |
+| Recordatorios de medicación | Cada 30 min | Envía WA según hora configurada por médico |
+| Encuestas post-control | Diario 10:00 AM Argentina | Envía encuesta WA 24h después de control marcado |
+
+## Infra
+- API: Render (Docker, node:20-alpine, dumb-init)
+- Panel: Vercel (Next.js 14 standalone)
+- DB: PostgreSQL (Railway/Neon)
+- WhatsApp: Meta Cloud API
+- AI: Anthropic Claude Sonnet 4.6
+- Monitoreo: UptimeRobot (recomendado) + structured JSON logs
+
+## Seguridad — Auditorías completadas
+- 5 code reviews con agentes especializados
+- 2 security audits completos
+- Todos los CRITICAL y HIGH resueltos
+- react-doctor: 97/100 (0 errores)
+- 44 lecciones documentadas en LESSONS.md
 
 ## Historial
 | Fecha | Paso | Qué se hizo |
 |-------|------|-------------|
 | 2026-03-30 | 0 | Spec, mapa visual, plan, CLAUDE.md, LESSONS.md, STATUS.md creados |
-| 2026-03-30 | 1 | Monorepo: git init, workspaces (apps/api, apps/web, packages/db), tsconfig base, .env.example, placeholders. Code review passed. |
-| 2026-03-30 | 2 | Prisma schema: 8 tablas, 7 enums, 28 indexes (optimizados por db-optimizer), 9 FKs. PostgreSQL via Docker (postgres:16-alpine). 2 migraciones (init + optimize_indexes). Seed: 9 programas IPS + 1 admin + 5 doctores + 50 pacientes + 75 inscripciones. Code review passed. |
-| 2026-03-30 | 3 | API Express base + Auth: 10 archivos, layered architecture (routes→services→Prisma). Auth JWT (access 15min + refresh 7d httpOnly cookie). Endpoints: login, refresh, me. Zod validation. Security audit: token type discrimination, HS256 algorithm lock, timing-attack dummy hash, cross-origin cookie config. Code review + security audit passed. |
-| 2026-03-30 | 4 | CRUD Pacientes + Deduplicación: 2 archivos nuevos (patient.service.ts 460 líneas, patient.routes.ts 167 líneas). 5 endpoints: GET / (búsqueda, filtros, paginación, role-based), GET /:id (con programas+reminders filtrados por role), POST / (UPSERT por DNI), PATCH /:id, POST /import (CSV all-or-nothing con $transaction). Security fixes: ValidationError en CSV, MAX_CSV_ROWS=5000, dedup DNI+phone interno, DOCTOR data visibility filtering. Code review + security audit passed. |
-| 2026-03-30 | 5 | Programas + Inscripciones + Control + Doctors: 4 archivos nuevos (program.service.ts, program.routes.ts, doctor.service.ts, doctor.routes.ts). 11 endpoints: GET/GET/:id/PATCH programs (role-based), POST enroll patient, POST mark control (recalcula nextReminderDate), PATCH status, DELETE patient-program, GET/POST/PATCH doctors, POST/DELETE doctor-programs. Security audit: self-demotion protection, P2002 race condition handling, select clauses, null-safety. Code review + security audit passed. |
-| 2026-03-30 | 6 | Webhook WhatsApp + Bot: 4 archivos nuevos (whatsapp.service.ts, ai.service.ts, conversation.service.ts, whatsapp.routes.ts) + 3 modificados (env.ts, routes/index.ts, app.ts). GET/POST /webhooks/whatsapp. Flujo registro (nombre→DNI→UPSERT), flujo chat (Claude Haiku), BAJA/ALTA handlers. Security: HMAC-SHA256 con hex validation + timingSafeEqual, production-only enforcement, DNI hijacking prevention, prompt injection defense, rate limiting, registration TTL 30min, message length cap, E.164 phone validation. Code review (3 CRITICAL + 4 HIGH fixed) + security audit (14 findings, all CRITICAL/HIGH resolved) passed. |
-| 2026-03-30 | 7 | Cron de recordatorios: 1 archivo nuevo (reminder.service.ts 195 líneas) + 1 modificado (index.ts). node-cron 8:00 AM Argentina (timezone explícito). Query optimizada con orderBy nextReminderDate ASC + take 500. Interpolación de templates + envío vía Meta Cloud API + registro en reminders (SENT/FAILED) + recálculo nextReminderDate. Security audit (10 findings): concurrency guard (in-process lock), max 5 retries consecutivos antes de PAUSED, inter-message delay 100ms para rate limits Meta, graceful shutdown await de run en curso, validación reminderFrequencyDays > 0, skip si WA no configurado, overflow warning log. Code review + security audit passed. |
-| 2026-03-30 | 8 | Panel web — Pantallas core: 25 archivos en apps/web/ (8 pages, 13 UI components, 3 lib files, 1 middleware) + 2 archivos API nuevos (dashboard.service.ts, dashboard.routes.ts). Next.js 14 + Tailwind + shadcn/ui (DM Sans font). Pages: Login, Dashboard (stats), Pacientes (tabla con búsqueda/filtros/paginación), Ficha paciente (datos + programas + marcar control + recordatorios + conversaciones), Programas (lista). API: GET /api/dashboard (stats con role-based filtering, Promise.all 6 queries, Date.UTC). Auth: JWT refresh automático, middleware route protection, AuthProvider context. react-doctor 100/100. Code review: fixed response shape mismatches (listPatients pagination, getPatientById missing includes: enrolledByDoctor, reminderFrequencyDays, conversations). Build passed. |
-| 2026-03-30 | 9 | Panel web — Pantallas admin: 2 archivos API nuevos (conversation.routes.ts, conversation-panel.service.ts) + 5 páginas frontend (programas edit, médicos CRUD, importar CSV, conversaciones lista, conversaciones detalle) + layout actualizado con nav items admin (role-based). Programas: dialog edición template/centros/frecuencia (admin only) con accesibilidad. Médicos: tabla + crear/editar/gestionar programas (3 dialogs). Importar CSV: drag&drop + preview 10 filas + validación client-side + nota server-side. Conversaciones: lista con búsqueda debounce + filtro status + paginación, detalle chat con bubbles USER/ASSISTANT/SYSTEM + load more. Code review: fixed 3 CRITICAL (where clause collision LESSONS#10, service layer violation, CSV info note) + 2 IMPORTANT (pagination order bug, search debounce). react-doctor 96/100. Build passed. |
-| 2026-03-30 | 10 | Deploy infra: Dockerfile multi-stage optimizado (node:20-alpine, dumb-init, non-root user, Prisma client copy from builder, bcrypt native compilation, BuildKit cache mounts). scripts/start-api.sh con guard DATABASE_URL + prisma migrate deploy. seed-prod.ts (9 programas + 1 admin, requiere ADMIN_PASSWORD). next.config.js con standalone output + security headers. CI/CD: .github/workflows/ci.yml (build + test + post-deploy health check). Observabilidad: structured JSON logger, request-logger middleware, health endpoints (/health, /health/deep, /health/cron), CronStatus tracking. SLO.md con targets piloto (95% API, 90% bot, 95% cron). DEPLOY.md con guía completa + estimación costos ($6-25 USD/mes). Docker audit: 2 CRITICAL + 3 HIGH fixed (Prisma CLI en prod, bcrypt native, cache clean, chown). Code review passed. Build passed. |
-| 2026-03-30 | 10+ | Deploy real en Render (API) + Vercel (Panel) + WhatsApp bot. Bugs encontrados y arreglados: (1) números argentinos 549→54 en WhatsApp Cloud API (LESSONS #40), (2) token sin permisos en Meta — regenerado, (3) redirect loop middleware↔layout con cookie expirado (LESSONS #41), (4) botones faltantes en panel: "Crear paciente" y "Inscribir en programa" agregados. Bot ahora incluye fechas de control en system prompt. Verificación E2E con Playwright: login, crear paciente, inscribir en Diabetes, marcar control — todo OK en producción. |
-| 2026-03-31 | 11 | Notas operativas: tabla patient_notes (VarChar 500, FK CASCADE/RESTRICT, indexes patientId+createdAt DESC, doctorId). API: note.service.ts (createNote, listNotes, getLatestNotesForBot) + note.routes.ts (GET/POST /api/patients/:id/notes). Validación: Zod max 500 + CSV injection regex + DB VarChar(500). Permisos: verifyPatientAccess (ADMIN all, DOCTOR via doctor_programs). Bot: últimas 3 notas en system prompt con doble defensa anti-leak (prompt reforzado + filtro server-side post-respuesta). Panel: sección notas en ficha paciente con formulario, disclaimer operativo, char counter, error handling, paginación load-more. Security audit: fixed C1 (prompt injection defense), H1 (VarChar DB constraint), H2 (JSDoc @internal), M1 (rate limit 10/min), M4 (error display). CLAUDE.md actualizado con excepción documentada. react-doctor 99/100. Build passed. |
-| 2026-03-31 | 14 | Exportar datos: GET /api/patients/export con filtros programa/status, CSV injection sanitization (LESSONS #30: csvSafe prefix), BOM para Excel (LESSONS #22), role-based filtering consistente con listPatients, take:5000. Panel: botón "Exportar CSV" con fetch+blob download + auth token. Build passed. |
-| 2026-03-31 | 15 | Editar paciente: botón "Editar" en ficha paciente + dialog con fullName, phone (E.164), birthDate, gender. DNI no editable (disabled, clave dedup). Solo envía campos modificados via PATCH existente. react-doctor 95/100. Build passed. |
-| 2026-03-31 | 13 | Alertas y pacientes en riesgo: GET /api/dashboard/alerts con 4 categorías (overdueCritical >60d, overdueWarning >30d, noResponse 3+ reminders, optedOut consent=false). Role-based con ppProgramFilter + reminderProgramFilter separados (Prisma type safety). Queries con take limits (LESSONS #13). Dashboard: sección alertas con semáforo (rojo/amarillo/naranja/gris), pacientes clickeables → ficha. Fetch paralelo stats+alerts. react-doctor 99/100. Build passed. |
-| 2026-03-31 | 12 | Próximo control editable: PATCH /api/patient-programs/:id/next-control con Zod YYYY-MM-DD + validación fecha futura + max 2 años + UTC (LESSONS #11). Solo programas ACTIVE (ConflictError si PAUSED/COMPLETED). Permisos via verifyPatientProgramAccess. Panel: botón CalendarDays al lado de "Próximo recordatorio" en ficha paciente (solo ACTIVE), dialog con date input (min tomorrow, max 2 años). react-doctor 99/100. Build passed. |
+| 2026-03-30 | 1 | Monorepo: git init, workspaces, tsconfig base, .env.example. Code review passed. |
+| 2026-03-30 | 2 | Prisma schema: 8 tablas, 7 enums, 28 indexes. Seed: 9 programas + admin + doctores + pacientes. Code review passed. |
+| 2026-03-30 | 3 | API Express + Auth JWT (access 15min + refresh 7d). Zod validation. Security audit passed. |
+| 2026-03-30 | 4 | CRUD Pacientes + Deduplicación DNI. CSV import. Code review + security audit passed. |
+| 2026-03-30 | 5 | Programas + Inscripciones + Control + Doctors. 11 endpoints. Security audit passed. |
+| 2026-03-30 | 6 | Webhook WhatsApp + Bot AI. Flujo registro + chat + BAJA/ALTA. HMAC-SHA256. Code review + security audit passed. |
+| 2026-03-30 | 7 | Cron recordatorios 8AM Argentina. Concurrency guard, rate limit. Security audit passed. |
+| 2026-03-30 | 8 | Panel web core: Login, Dashboard, Pacientes, Ficha, Programas. react-doctor 100/100. |
+| 2026-03-30 | 9 | Panel admin: Médicos CRUD, Importar CSV, Conversaciones. react-doctor 96/100. |
+| 2026-03-30 | 10 | Deploy: Dockerfile multi-stage, CI/CD, health endpoints, SLOs. Docker audit passed. |
+| 2026-03-30 | 10+ | Deploy producción Render + Vercel. Bugs de números argentinos + redirect loop arreglados. E2E verificado. |
+| 2026-03-31 | 11 | Notas operativas: tabla + API + panel + bot context. Security audit: prompt injection defense, VarChar DB, rate limit. |
+| 2026-03-31 | 12 | Próximo control editable: PATCH next-control + date picker UI. UTC getters fix (LESSONS #44). |
+| 2026-03-31 | 13 | Alertas dashboard: 4 categorías con semáforo. Split queries overdue. noResponse con ventana 90 días. |
+| 2026-03-31 | 14 | Exportar CSV: sanitización (LESSONS #30), BOM Excel, role-based, auth token refresh. |
+| 2026-03-31 | 15 | Editar paciente: dialog con validación, phone nullable, DNI no editable. |
+| 2026-03-31 | 16 | Base de conocimiento: tabla knowledge_base, 30 FAQs reales IPS (coberturas, programas, delegaciones), CRUD panel, bot keyword matching. |
+| 2026-03-31 | 17 | Derivación a humano: enum ESCALATED, detección keywords, bot silencioso durante escalación, panel reply + close, WA desde panel. |
+| 2026-03-31 | 18 | Encuestas post-control: tabla surveys con dispatchedAt, cron diario 10AM, bot parsea Sí/No + rating 1-5, dashboard satisfacción con bar chart. |
+| 2026-03-31 | — | Recordatorios medicación: tabla medication_reminders, CRUD panel en ficha paciente, cron cada 30min con Intl timezone, WA diario. |
+| 2026-03-31 | — | Bot upgrade: Haiku→Sonnet 4.6, personalidad "Ana", system prompt humanizado, 0800 como último recurso. |
+| 2026-03-31 | — | KB datos reales: 30 FAQs verificadas de ipsmisiones.com.ar (coberturas, programas, delegaciones, trámites, urgencias). |
+| 2026-03-31 | — | Review completo: 3 code reviews + 2 security audits. Fixed: access control meds, ESCALATED guards, phone normalization, survey dispatch, timezone, debounce. react-doctor 97/100. |
