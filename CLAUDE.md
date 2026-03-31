@@ -35,6 +35,11 @@ Después de pasar la verificación y el code review, hacer `git commit` con un m
 - Solo: nombre, DNI, teléfono, programa, fechas de control
 - NO existe tabla medical_notes — eliminada por diseño
 - El médico solo puede "marcar control realizado" (una fecha)
+- EXCEPCIÓN: tabla `patient_notes` para notas OPERATIVAS (logística, contactabilidad, preferencias de horario)
+  - Max 500 caracteres
+  - Disclaimer obligatorio en la UI: "Solo notas operativas. No incluir diagnósticos ni datos clínicos."
+  - NUNCA contienen datos clínicos — eso queda en Alegramed, no en este sistema
+  - El bot incluye las últimas 3 notas en contexto pero NUNCA las revela al paciente (doble defensa: prompt + filtro server-side)
 
 ## Bot — reglas
 - NUNCA evaluar síntomas ni recomendar tratamientos

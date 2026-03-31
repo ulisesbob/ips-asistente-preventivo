@@ -84,13 +84,13 @@ Cada paso depende del anterior. No saltar pasos.
 
 ---
 
-### Paso 11 — Notas operativas del paciente
-- [ ] Nueva tabla `patient_notes` (id, patientId, doctorId, content, createdAt)
-- [ ] API: POST /api/patients/:id/notes, GET /api/patients/:id/notes
-- [ ] Validación: max 500 chars, sanitizar contra CSV injection
-- [ ] Panel: sección "Notas" en ficha del paciente con formulario y listado
-- [ ] Bot: incluir últimas 3 notas operativas en el system prompt
-- [ ] Permisos: ADMIN ve todas, DOCTOR solo las de sus programas
+### Paso 11 — Notas operativas del paciente ✅
+- [x] Nueva tabla `patient_notes` (id, patientId, doctorId, content, createdAt)
+- [x] API: POST /api/patients/:id/notes, GET /api/patients/:id/notes
+- [x] Validación: max 500 chars, sanitizar contra CSV injection
+- [x] Panel: sección "Notas" en ficha del paciente con formulario y listado
+- [x] Bot: incluir últimas 3 notas operativas en el system prompt
+- [x] Permisos: ADMIN ve todas, DOCTOR solo las de sus programas
 
 ### Paso 12 — Próximo control editable
 - [ ] API: PATCH /api/patient-programs/:id/next-control con fecha manual

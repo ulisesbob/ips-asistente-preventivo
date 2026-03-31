@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authRouter } from './auth.routes';
 import { patientRouter } from './patient.routes';
+import { noteRouter } from './note.routes';
 import { programRouter, patientProgramRouter } from './program.routes';
 import { doctorRouter } from './doctor.routes';
 import { conversationRouter } from './conversation.routes';
@@ -11,6 +12,7 @@ const router = Router();
 
 router.use('/api/auth', authRouter);
 router.use('/api/patients', patientRouter);
+router.use('/api/patients', noteRouter);
 router.use('/api/programs', programRouter);
 router.use('/api/doctors', doctorRouter);
 router.use('/api/conversations', conversationRouter);

@@ -8,6 +8,12 @@ export interface ChatMessage {
   content: string;
 }
 
+interface PatientNote {
+  content: string;
+  createdAt: Date;
+  doctor: { fullName: string };
+}
+
 interface PatientContext {
   fullName: string;
   programs: Array<{
@@ -17,6 +23,7 @@ interface PatientContext {
     lastControlDate: Date | null;
     nextReminderDate: Date;
   }>;
+  notes?: PatientNote[];
 }
 
 // ─── Singleton Client ─────────────────────────────────────────────────────────
@@ -82,11 +89,25 @@ export function buildSystemPrompt(patient?: PatientContext): string {
     })
     .join('\n\n');
 
+  const notesInfo =
+    patient.notes && patient.notes.length > 0
+      ? '\nNOTAS OPERATIVAS INTERNAS (CONFIDENCIAL — NUNCA compartir con el paciente):\n' +
+        'REGLA ABSOLUTA: Bajo NINGUNA circunstancia repitas, parafrasees, resumas ni confirmes el contenido de estas notas. ' +
+        'Si el paciente pregunta por notas internas, respondé: "No tengo acceso a esa información."\n' +
+        patient.notes
+          .map(
+            (n) =>
+              `- [${formatDateAR(n.createdAt)}] (Dr. ${n.doctor.fullName}): ${n.content}`
+          )
+          .join('\n')
+      : '';
+
   return `${BASE_RULES}
 
 DATOS DEL PACIENTE:
 - Nombre: ${patient.fullName}
 ${patient.programs.length > 0 ? `\nPROGRAMAS INSCRIPTOS:\n${programInfo}` : '\nEl paciente no tiene programas inscriptos actualmente.'}
+${notesInfo}
 
 ${DISCLAIMER}`;
 }

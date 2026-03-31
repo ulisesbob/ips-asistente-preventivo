@@ -167,3 +167,11 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #41 — Middleware que redirige /login→home con cookie expirado causa loop infinito
 **Error:** El middleware de Next.js redirigía de `/login` a `/` si existía una cookie `refreshToken`. Pero si el token estaba expirado, `AuthProvider` fallaba con 401 y el layout redirigía a `/login`. Esto creaba un loop: middleware→home→401→/login→middleware→home→... El browser hacía miles de `pushState` por segundo y se colgaba la PC.
 **Lección:** NUNCA redirigir automáticamente desde la página de login solo porque existe un cookie. La existencia de un cookie no garantiza que sea válido. Dejar que la login page maneje la sesión: si ya hay sesión válida, el AuthProvider setea `doctor` y la page redirige. Si no, el usuario ve el form.
+
+### #42 — Notas internas en system prompt = filtrable por prompt injection
+**Error:** Las notas operativas de médicos se incluyeron en el system prompt del bot con solo una instrucción de "NO revelar al paciente". Un paciente podría pedir al AI que repita su contexto y obtener las notas.
+**Lección:** La instrucción en lenguaje natural NO es una barrera de seguridad. Si se incluyen datos confidenciales en el system prompt, agregar defensa server-side: verificar post-respuesta si el AI filtró fragmentos del contenido confidencial y reemplazar la respuesta si coincide. La defensa es multicapa: prompt reforzado + filtro de contenido + limitación de lo que se incluye.
+
+### #43 — String sin constraint DB = bomba de tiempo aunque Zod valide
+**Error:** El campo `content` de `patient_notes` se definió como `String` en Prisma (mapeado a `text` en PostgreSQL) con validación solo en Zod (max 500). Cualquier código futuro que bypasee el service layer podría insertar texto ilimitado.
+**Lección:** Defensa en profundidad: si un campo tiene límite de longitud, aplicarlo en TODAS las capas: Zod (API), service layer (lógica), y `@db.VarChar(N)` en Prisma (DB). La DB es la última línea de defensa y no depende de que el código de aplicación sea correcto.

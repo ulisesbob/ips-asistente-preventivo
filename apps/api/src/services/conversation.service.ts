@@ -7,6 +7,7 @@ import {
 } from '@ips/db';
 import { sendTextMessage } from './whatsapp.service';
 import { generateResponse, buildSystemPrompt, ChatMessage } from './ai.service';
+import { getLatestNotesForBot } from './note.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -297,7 +298,10 @@ async function handleChat(
   },
   text: string
 ): Promise<void> {
-  // Build system prompt with patient context
+  // Fetch latest operational notes for bot context
+  const notes = await getLatestNotesForBot(patient.id);
+
+  // Build system prompt with patient context + notes
   const systemPrompt = buildSystemPrompt({
     fullName: patient.fullName,
     programs: patient.programs.map((pp) => ({
@@ -307,6 +311,7 @@ async function handleChat(
       lastControlDate: pp.lastControlDate,
       nextReminderDate: pp.nextReminderDate,
     })),
+    notes,
   });
 
   // Get conversation history
@@ -328,6 +333,27 @@ async function handleChat(
     aiResponse =
       'Disculpá, estoy teniendo un problema técnico. ' +
       'Para consultas, comuníquese al 0800-888-0109.';
+  }
+
+  // Server-side defense: check if AI leaked note content (C1 security fix)
+  if (notes.length > 0) {
+    const leaked = notes.some((n) => {
+      const words = n.content.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
+      // Check if 3+ consecutive words from a note appear in the response
+      const responseLower = aiResponse.toLowerCase();
+      for (let i = 0; i <= words.length - 3; i++) {
+        const fragment = words.slice(i, i + 3).join(' ');
+        if (responseLower.includes(fragment)) return true;
+      }
+      return false;
+    });
+    if (leaked) {
+      console.warn(`[Security] AI response may contain leaked note content for patient ${patient.id}. Replacing.`);
+      aiResponse =
+        'No tengo acceso a esa información. ' +
+        '¿Hay algo más en lo que pueda ayudarte?\n\n' +
+        'Esta información es orientativa. Para consultas sobre su caso, comuníquese al 0800-888-0109.';
+    }
   }
 
   // Save both messages and send reply

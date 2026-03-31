@@ -61,6 +61,7 @@ model Doctor {
 
   programs         DoctorProgram[]
   enrolledPatients PatientProgram[]
+  notes            PatientNote[]
 
   @@map("doctors")
 }
@@ -94,6 +95,7 @@ model Patient {
   programs      PatientProgram[]
   reminders     Reminder[]
   conversations Conversation[]
+  notes         PatientNote[]
 
   // phone already has @unique which creates an index — no separate @@index needed
   @@index([fullName])
@@ -187,4 +189,19 @@ model Message {
 
   @@index([conversationId, createdAt])
   @@map("messages")
+}
+
+model PatientNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  patientId String   @db.Uuid
+  doctorId  String   @db.Uuid
+  content   String   @db.VarChar(500)
+  createdAt DateTime @default(now()) @db.Timestamptz()
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor  Doctor  @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+
+  @@index([patientId, createdAt(sort: Desc)])
+  @@index([doctorId])
+  @@map("patient_notes")
 }

@@ -19,6 +19,8 @@ import {
   Shield,
   ShieldOff,
   Plus,
+  StickyNote,
+  Send,
 } from 'lucide-react';
 
 interface PatientDetail {
@@ -64,6 +66,13 @@ interface Conversation {
   _count: { messages: number };
 }
 
+interface PatientNoteItem {
+  id: string;
+  content: string;
+  createdAt: string;
+  doctor: { id: string; fullName: string };
+}
+
 const STATUS_CONFIG = {
   ACTIVE: { label: 'Activo', icon: Play, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   PAUSED: { label: 'Pausado', icon: Pause, className: 'bg-amber-50 text-amber-700 border-amber-200' },
@@ -87,6 +96,12 @@ export default function PatientDetailPage() {
   const [programs, setPrograms] = useState<{ id: string; name: string }[]>([]);
   const [selectedProgramId, setSelectedProgramId] = useState('');
   const [enrollLoading, setEnrollLoading] = useState(false);
+  const [notes, setNotes] = useState<PatientNoteItem[]>([]);
+  const [notesPage, setNotesPage] = useState(1);
+  const [notesTotal, setNotesTotal] = useState(0);
+  const [notesPages, setNotesPages] = useState(0);
+  const [noteContent, setNoteContent] = useState('');
+  const [noteSubmitting, setNoteSubmitting] = useState(false);
 
   const fetchPatient = useCallback(async () => {
     try {
@@ -99,9 +114,47 @@ export default function PatientDetailPage() {
     }
   }, [id]);
 
+  const [notesError, setNotesError] = useState<string | null>(null);
+
+  const fetchNotes = useCallback(async (page = 1) => {
+    try {
+      setNotesError(null);
+      const result = await apiGet<{
+        notes: PatientNoteItem[];
+        pagination: { page: number; total: number; pages: number };
+      }>(`/api/patients/${id}/notes?page=${page}&limit=10`);
+      if (page === 1) {
+        setNotes(result.notes);
+      } else {
+        setNotes((prev) => [...prev, ...result.notes]);
+      }
+      setNotesPage(result.pagination.page);
+      setNotesTotal(result.pagination.total);
+      setNotesPages(result.pagination.pages);
+    } catch (err) {
+      setNotesError(err instanceof Error ? err.message : 'Error al cargar notas');
+    }
+  }, [id]);
+
+  async function handleSubmitNote() {
+    const trimmed = noteContent.trim();
+    if (!trimmed || noteSubmitting) return;
+    setNoteSubmitting(true);
+    try {
+      await apiPost(`/api/patients/${id}/notes`, { content: trimmed });
+      setNoteContent('');
+      await fetchNotes(1);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al crear nota');
+    } finally {
+      setNoteSubmitting(false);
+    }
+  }
+
   useEffect(() => {
     fetchPatient();
-  }, [fetchPatient]);
+    fetchNotes(1);
+  }, [fetchPatient, fetchNotes]);
 
   async function openEnrollDialog() {
     try {
@@ -399,6 +452,86 @@ export default function PatientDetailPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* Notes */}
+      <div className="bg-white rounded-lg border border-border">
+        <div className="px-5 py-4 border-b border-border">
+          <h2 className="text-sm font-medium text-foreground flex items-center gap-2">
+            <StickyNote className="w-4 h-4" />
+            Notas operativas ({notesTotal})
+          </h2>
+        </div>
+        {/* New note form */}
+        <div className="px-5 py-4 border-b border-border">
+          <div className="flex gap-2">
+            <textarea
+              value={noteContent}
+              onChange={(e) => setNoteContent(e.target.value)}
+              placeholder="Escribir nota operativa..."
+              maxLength={500}
+              rows={2}
+              className="flex-1 px-3 py-2 rounded-md border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  handleSubmitNote();
+                }
+              }}
+            />
+            <button
+              onClick={handleSubmitNote}
+              disabled={noteSubmitting || !noteContent.trim()}
+              className="self-end px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+              title="Guardar nota (Ctrl+Enter)"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex justify-between mt-1">
+            <p className="text-xs text-amber-600">
+              Solo notas operativas. No incluir diagnósticos ni datos clínicos.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {noteContent.length}/500
+            </p>
+          </div>
+        </div>
+        {/* Notes list */}
+        {notesError ? (
+          <p className="px-5 py-8 text-sm text-red-600 text-center">{notesError}</p>
+        ) : notes.length === 0 ? (
+          <p className="px-5 py-8 text-sm text-muted-foreground text-center">
+            Sin notas operativas
+          </p>
+        ) : (
+          <div className="divide-y divide-border">
+            {notes.map((note) => (
+              <div key={note.id} className="px-5 py-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-foreground">
+                    {note.doctor.fullName}
+                  </span>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {formatDateTime(note.createdAt)}
+                  </span>
+                </div>
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                  {note.content}
+                </p>
+              </div>
+            ))}
+            {notesPage < notesPages && (
+              <div className="px-5 py-3 text-center">
+                <button
+                  onClick={() => fetchNotes(notesPage + 1)}
+                  className="text-xs text-primary hover:underline cursor-pointer"
+                >
+                  Cargar más notas
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
