@@ -179,3 +179,19 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #43 — String sin constraint DB = bomba de tiempo aunque Zod valide
 **Error:** El campo `content` de `patient_notes` se definió como `String` en Prisma (mapeado a `text` en PostgreSQL) con validación solo en Zod (max 500). Cualquier código futuro que bypasee el service layer podría insertar texto ilimitado.
 **Lección:** Defensa en profundidad: si un campo tiene límite de longitud, aplicarlo en TODAS las capas: Zod (API), service layer (lógica), y `@db.VarChar(N)` en Prisma (DB). La DB es la última línea de defensa y no depende de que el código de aplicación sea correcto.
+
+### #45 — Meta reenvía webhooks cuando el server estaba caído → respuestas duplicadas
+**Error:** Cuando Render apagó el container (SIGTERM por redeploy/inactividad), Meta acumuló los webhooks no entregados. Al despertar el container, Meta los envió todos de golpe (~200 en 10 segundos). El bot procesó el mismo mensaje 8 veces y el paciente recibió ~30 respuestas idénticas.
+**Lección:** SIEMPRE deduplicar webhooks por messageId. Meta incluye un ID único en cada mensaje. Guardar los IDs procesados en un Set in-memory y skipear duplicados. Limpiar el Set periódicamente para no leakear memoria.
+
+### #46 — Token temporal de WhatsApp expira cada 24hs sin aviso
+**Error:** El bot generaba la respuesta correctamente pero no podía enviarla porque el WHATSAPP_ACCESS_TOKEN de Meta había expirado. El paciente no recibía nada y no había log claro del motivo.
+**Lección:** Los tokens temporales de Meta duran ~24hs. Para producción real, usar un System User token (permanente) desde Meta Business Manager. Mientras tanto, regenerar el token diariamente o agregar un log explícito cuando el envío falla por 401 con "Session has expired".
+
+### #47 — Claude API overloaded_error deja al paciente sin respuesta
+**Error:** Anthropic devolvía `overloaded_error` y el bot caía al catch genérico "problema técnico, llamá al 0800". El paciente quedaba sin respuesta útil.
+**Lección:** Siempre implementar retry + fallback para APIs de terceros. Para Claude: reintentar Sonnet 2 veces con delay de 2 seg, si sigue fallando caer a Haiku (siempre disponible, más rápido). El paciente SIEMPRE debe recibir alguna respuesta.
+
+### #48 — router.replace() durante el render de React causa crash
+**Error:** En `layout.tsx`, `router.replace('/login')` se llamaba durante el render cuando `!doctor`. Esto viola las reglas de React ("Cannot update a component while rendering a different component") y puede causar loops infinitos.
+**Lección:** Las navegaciones en React SIEMPRE van dentro de `useEffect`, nunca en el cuerpo del render. El render debe ser puro — sin side effects.

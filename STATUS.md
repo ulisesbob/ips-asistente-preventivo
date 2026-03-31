@@ -1,13 +1,14 @@
 # Estado del Proyecto
 
 ## Estado actual
-- **Último paso completado:** Paso 18 — Encuestas post-control + Recordatorios de medicación
-- **Paso actual:** TODOS LOS PASOS COMPLETADOS (1-18) + features extras
-- **Bloqueadores:** Ninguno
-- **Deploy:** Producción activa en Render (API) + Vercel (Panel)
-- **Bot:** Sonnet 4.6, personalidad "Ana", base de conocimiento con datos reales del IPS
+- **Último paso completado:** Paso 18 + todas las features extras
+- **Estado:** PRODUCCIÓN ACTIVA — Render (API) + Vercel (Panel) + WhatsApp Bot
+- **Bot:** Sonnet 4.6 con retry + fallback Haiku, personalidad "Ana", 30 FAQs reales IPS
+- **UptimeRobot:** Configurado — ping cada 5 min a /health
+- **Bloqueadores:** Token de WhatsApp temporal (regenerar cada 24hs o migrar a System User token permanente)
 
-## Features implementadas
+## Features implementadas (24 en total)
+
 | # | Feature | Estado |
 |---|---------|--------|
 | 1 | Monorepo + config base | ✅ |
@@ -29,17 +30,24 @@
 | 17 | Derivación a humano (escalamiento) | ✅ |
 | 18 | Encuestas post-control | ✅ |
 | — | Recordatorios de medicación diarios | ✅ |
-| — | Bot upgrade a Sonnet 4.6 + personalidad "Ana" | ✅ |
+| — | Bot Sonnet 4.6 + personalidad "Ana" | ✅ |
 | — | KB con datos reales de ipsmisiones.com.ar | ✅ |
+| — | Deduplicación de webhooks Meta | ✅ |
+| — | Retry Sonnet 2x + fallback Haiku | ✅ |
+| — | Inscripción a programas → derivación presencial | ✅ |
 
-## Bot — Capacidades
-- Responde preguntas de coberturas, trámites, programas, urgencias (30 FAQs)
+## Bot — Capacidades actuales
+- Responde preguntas de coberturas, trámites, programas, urgencias (30 FAQs reales)
 - Da fechas exactas de próximo control y centros de atención
+- Informa medicación activa del paciente (nombre, dosis, horario)
 - Sabe que envía recordatorios automáticos (controles + medicación)
 - Escala a humano cuando el paciente lo pide
 - Hace encuestas de satisfacción post-control
+- Explica cómo inscribirse presencialmente en programas
+- Retry Sonnet 2x + fallback a Haiku si Anthropic está saturado
+- Deduplicación de webhooks (no responde 30 veces al mismo mensaje)
 - Tono: "Ana", secretaria amable del IPS, español argentino
-- Modelo: Claude Sonnet 4.6
+- Modelo primario: Claude Sonnet 4.6 / Fallback: Claude Haiku 4.5
 - 0800 solo como último recurso
 
 ## Crons activos
@@ -50,44 +58,38 @@
 | Encuestas post-control | Diario 10:00 AM Argentina | Envía encuesta WA 24h después de control marcado |
 
 ## Infra
-- API: Render (Docker, node:20-alpine, dumb-init)
+- API: Render (Docker, node:20-alpine, dumb-init) + UptimeRobot keep-alive
 - Panel: Vercel (Next.js 14 standalone)
-- DB: PostgreSQL (Railway/Neon)
-- WhatsApp: Meta Cloud API
-- AI: Anthropic Claude Sonnet 4.6
-- Monitoreo: UptimeRobot (recomendado) + structured JSON logs
+- DB: PostgreSQL (Neon — ep-billowing-cherry)
+- WhatsApp: Meta Cloud API (token temporal, pendiente migrar a permanente)
+- AI: Anthropic Claude Sonnet 4.6 + Haiku 4.5 fallback
+- Monitoreo: UptimeRobot (ping /health cada 5 min)
+
+## Testing
+- **140 tests unitarios**, 9 archivos, todo verde
+- Cobertura: auth, middleware, phone normalization, CSV sanitization, escalation detection, survey parsing, medication slots, KB keywords
 
 ## Seguridad — Auditorías completadas
 - 5 code reviews con agentes especializados
 - 2 security audits completos
-- Todos los CRITICAL y HIGH resueltos
+- 1 análisis profundo de frontend (11 bugs encontrados y resueltos)
+- 1 análisis profundo de backend (12 bugs encontrados y resueltos)
 - react-doctor: 97/100 (0 errores)
-- 44 lecciones documentadas en LESSONS.md
+- 48 lecciones documentadas en LESSONS.md
+
+## Pendientes para próxima sesión
+1. **Token permanente de WhatsApp** — System User en Meta Business Manager (requiere acceso del usuario)
+2. **Verificación de negocio en Meta** — Para enviar a cualquier número sin lista blanca
+3. **Templates de mensaje aprobados** — Para recordatorios proactivos
+4. **Render Starter ($7/mes)** — Si el free tier sigue matando el container
 
 ## Historial
-| Fecha | Paso | Qué se hizo |
-|-------|------|-------------|
-| 2026-03-30 | 0 | Spec, mapa visual, plan, CLAUDE.md, LESSONS.md, STATUS.md creados |
-| 2026-03-30 | 1 | Monorepo: git init, workspaces, tsconfig base, .env.example. Code review passed. |
-| 2026-03-30 | 2 | Prisma schema: 8 tablas, 7 enums, 28 indexes. Seed: 9 programas + admin + doctores + pacientes. Code review passed. |
-| 2026-03-30 | 3 | API Express + Auth JWT (access 15min + refresh 7d). Zod validation. Security audit passed. |
-| 2026-03-30 | 4 | CRUD Pacientes + Deduplicación DNI. CSV import. Code review + security audit passed. |
-| 2026-03-30 | 5 | Programas + Inscripciones + Control + Doctors. 11 endpoints. Security audit passed. |
-| 2026-03-30 | 6 | Webhook WhatsApp + Bot AI. Flujo registro + chat + BAJA/ALTA. HMAC-SHA256. Code review + security audit passed. |
-| 2026-03-30 | 7 | Cron recordatorios 8AM Argentina. Concurrency guard, rate limit. Security audit passed. |
-| 2026-03-30 | 8 | Panel web core: Login, Dashboard, Pacientes, Ficha, Programas. react-doctor 100/100. |
-| 2026-03-30 | 9 | Panel admin: Médicos CRUD, Importar CSV, Conversaciones. react-doctor 96/100. |
-| 2026-03-30 | 10 | Deploy: Dockerfile multi-stage, CI/CD, health endpoints, SLOs. Docker audit passed. |
-| 2026-03-30 | 10+ | Deploy producción Render + Vercel. Bugs de números argentinos + redirect loop arreglados. E2E verificado. |
-| 2026-03-31 | 11 | Notas operativas: tabla + API + panel + bot context. Security audit: prompt injection defense, VarChar DB, rate limit. |
-| 2026-03-31 | 12 | Próximo control editable: PATCH next-control + date picker UI. UTC getters fix (LESSONS #44). |
-| 2026-03-31 | 13 | Alertas dashboard: 4 categorías con semáforo. Split queries overdue. noResponse con ventana 90 días. |
-| 2026-03-31 | 14 | Exportar CSV: sanitización (LESSONS #30), BOM Excel, role-based, auth token refresh. |
-| 2026-03-31 | 15 | Editar paciente: dialog con validación, phone nullable, DNI no editable. |
-| 2026-03-31 | 16 | Base de conocimiento: tabla knowledge_base, 30 FAQs reales IPS (coberturas, programas, delegaciones), CRUD panel, bot keyword matching. |
-| 2026-03-31 | 17 | Derivación a humano: enum ESCALATED, detección keywords, bot silencioso durante escalación, panel reply + close, WA desde panel. |
-| 2026-03-31 | 18 | Encuestas post-control: tabla surveys con dispatchedAt, cron diario 10AM, bot parsea Sí/No + rating 1-5, dashboard satisfacción con bar chart. |
-| 2026-03-31 | — | Recordatorios medicación: tabla medication_reminders, CRUD panel en ficha paciente, cron cada 30min con Intl timezone, WA diario. |
-| 2026-03-31 | — | Bot upgrade: Haiku→Sonnet 4.6, personalidad "Ana", system prompt humanizado, 0800 como último recurso. |
-| 2026-03-31 | — | KB datos reales: 30 FAQs verificadas de ipsmisiones.com.ar (coberturas, programas, delegaciones, trámites, urgencias). |
-| 2026-03-31 | — | Review completo: 3 code reviews + 2 security audits. Fixed: access control meds, ESCALATED guards, phone normalization, survey dispatch, timezone, debounce. react-doctor 97/100. |
+| Fecha | Qué se hizo |
+|-------|-------------|
+| 2026-03-30 | Pasos 0-10: Spec, monorepo, DB, API, bot, crons, panel, deploy producción |
+| 2026-03-31 | Pasos 11-15: Notas, control editable, alertas, exportar CSV, editar paciente |
+| 2026-03-31 | Pasos 16-18: Base de conocimiento (30 FAQs reales IPS), derivación a humano, encuestas post-control |
+| 2026-03-31 | Extras: Recordatorios de medicación, bot Sonnet 4.6 + personalidad "Ana", KB datos reales ipsmisiones.com.ar |
+| 2026-03-31 | Bug fixes: Deduplicación webhooks Meta, retry Sonnet + fallback Haiku, phone normalization, ESCALATED guards, survey dispatchedAt, birthDate UTC |
+| 2026-03-31 | Reviews: 5 code reviews, 2 security audits, 2 deep bug hunts (frontend + backend), 140 tests |
+| 2026-03-31 | Infra: UptimeRobot configurado, escalabilidad 500 pacientes simultáneos, PDF presentación generado |
