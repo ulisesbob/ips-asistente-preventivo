@@ -177,17 +177,19 @@ export async function getAlerts(doctorId: string, role: Role): Promise<Dashboard
   const warningDate = daysAgoUTC(OVERDUE_WARNING_DAYS);
   const criticalDate = daysAgoUTC(OVERDUE_CRITICAL_DAYS);
 
-  // Run all queries in parallel
-  const [overdueResults, optedOutResults] = await Promise.all([
-    // Overdue controls: nextReminderDate in the past AND status ACTIVE
+  // Fix #3: Split overdue into 2 separate queries so take limits don't mix categories
+  const activePatientFilter = { consent: true, phone: { not: null as string | null } };
+
+  const [overdueCriticalResults, overdueWarningResults, optedOutResults] = await Promise.all([
+    // Critical: nextReminderDate > 60 days ago
     prisma.patientProgram.findMany({
       where: {
         ...ppProgramFilter,
         status: PatientProgramStatus.ACTIVE,
-        nextReminderDate: { lt: todayUTC },
-        patient: { consent: true, phone: { not: null } },
+        nextReminderDate: { lt: criticalDate },
+        patient: activePatientFilter,
       },
-      take: 100, // LESSONS #13
+      take: 50, // LESSONS #13
       orderBy: { nextReminderDate: 'asc' },
       select: {
         id: true,
@@ -197,17 +199,34 @@ export async function getAlerts(doctorId: string, role: Role): Promise<Dashboard
       },
     }),
 
-    // Opted out patients (consent = false)
+    // Warning: nextReminderDate between 30 and 60 days ago
+    prisma.patientProgram.findMany({
+      where: {
+        ...ppProgramFilter,
+        status: PatientProgramStatus.ACTIVE,
+        nextReminderDate: { gte: criticalDate, lt: warningDate },
+        patient: activePatientFilter,
+      },
+      take: 50, // LESSONS #13
+      orderBy: { nextReminderDate: 'asc' },
+      select: {
+        id: true,
+        nextReminderDate: true,
+        patient: { select: { id: true, fullName: true, dni: true } },
+        program: { select: { name: true } },
+      },
+    }),
+
+    // Fix #5: Opted out — only patients with ACTIVE program enrollments
     prisma.patient.findMany({
       where: {
         consent: false,
-        ...(isAdmin
-          ? {}
-          : {
-              programs: {
-                some: { programId: { in: doctorProgramIds } },
-              },
-            }),
+        programs: {
+          some: {
+            ...(isAdmin ? {} : { programId: { in: doctorProgramIds } }),
+            status: PatientProgramStatus.ACTIVE,
+          },
+        },
       },
       take: 50, // LESSONS #13
       orderBy: { createdAt: 'desc' },
@@ -216,46 +235,41 @@ export async function getAlerts(doctorId: string, role: Role): Promise<Dashboard
         fullName: true,
         dni: true,
         programs: {
-          where: ppProgramFilter,
+          where: { ...ppProgramFilter, status: PatientProgramStatus.ACTIVE },
           take: 1,
+          orderBy: { enrolledAt: 'desc' }, // Fix #8: deterministic program name
           select: { program: { select: { name: true } } },
         },
       },
     }),
   ]);
 
-  // Categorize overdue patients
-  const overdueWarning: AlertPatient[] = [];
-  const overdueCritical: AlertPatient[] = [];
-
-  for (const pp of overdueResults) {
-    const daysOverdue = Math.floor(
-      (todayUTC.getTime() - new Date(pp.nextReminderDate).getTime()) / (1000 * 60 * 60 * 24)
-    );
-
-    const entry: AlertPatient = {
+  // Map overdue results to AlertPatient
+  function mapOverdue(results: typeof overdueCriticalResults): AlertPatient[] {
+    return results.map((pp) => ({
       id: pp.patient.id,
       fullName: pp.patient.fullName,
       dni: pp.patient.dni,
       programName: pp.program.name,
-      daysOverdue,
-    };
-
-    if (daysOverdue > OVERDUE_CRITICAL_DAYS) {
-      overdueCritical.push(entry);
-    } else if (daysOverdue > OVERDUE_WARNING_DAYS) {
-      overdueWarning.push(entry);
-    }
+      daysOverdue: Math.floor(
+        (todayUTC.getTime() - new Date(pp.nextReminderDate).getTime()) / (1000 * 60 * 60 * 24)
+      ),
+    }));
   }
 
-  // No-response: patients with 3+ SENT reminders where patientReplied = false
-  // Use raw groupBy to find patients with multiple unreplied reminders
+  const overdueCritical = mapOverdue(overdueCriticalResults);
+  const overdueWarning = mapOverdue(overdueWarningResults);
+
+  // Fix #4: No-response with 90-day time window to avoid stale alerts
+  const noResponseWindow = daysAgoUTC(90);
+
   const noResponseGroups = await prisma.reminder.groupBy({
     by: ['patientId'],
     where: {
       ...reminderProgramFilter,
       status: ReminderStatus.SENT,
       patientReplied: false,
+      sentAt: { gte: noResponseWindow },
     },
     _count: { id: true },
     having: {
@@ -277,6 +291,7 @@ export async function getAlerts(doctorId: string, role: Role): Promise<Dashboard
         programs: {
           where: { ...ppProgramFilter, status: PatientProgramStatus.ACTIVE },
           take: 1,
+          orderBy: { enrolledAt: 'desc' }, // Fix #8: deterministic program name
           select: { program: { select: { name: true } } },
         },
       },
