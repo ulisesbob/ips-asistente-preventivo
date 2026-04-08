@@ -5,7 +5,7 @@
 - **Estado:** PRODUCCIÓN ACTIVA — Render (API) + Vercel (Panel) + WhatsApp Bot
 - **Bot:** Sonnet 4.6 con retry + fallback Haiku, personalidad "Ana", 30 FAQs reales IPS
 - **UptimeRobot:** Configurado — ping cada 5 min a /health
-- **Bloqueadores:** Token de WhatsApp temporal (regenerar cada 24hs o migrar a System User token permanente)
+- **Bloqueadores:** Ninguno activo
 
 ## Features implementadas (24 en total)
 
@@ -78,7 +78,7 @@
 - 48 lecciones documentadas en LESSONS.md
 
 ## Pendientes para próxima sesión
-1. **Token permanente de WhatsApp** — System User en Meta Business Manager (requiere acceso del usuario)
+1. ~~**Token permanente de WhatsApp**~~ — ✅ Configurado en Render (2026-04-05)
 2. **Verificación de negocio en Meta** — Para enviar a cualquier número sin lista blanca
 3. **Templates de mensaje aprobados** — Para recordatorios proactivos
 4. **Render Starter ($7/mes)** — Si el free tier sigue matando el container

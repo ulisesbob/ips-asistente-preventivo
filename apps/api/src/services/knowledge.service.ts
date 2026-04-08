@@ -159,32 +159,63 @@ export async function deleteKBEntry(id: string) {
  * Fetches KB entries relevant to the user's message for the AI system prompt.
  * Uses keyword matching to find relevant FAQs.
  */
+const BOT_STOPWORDS = new Set([
+  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas',
+  'de', 'del', 'al', 'en', 'con', 'por', 'para', 'sin',
+  'que', 'es', 'son', 'fue', 'ser', 'hay', 'mas', 'pero',
+  'como', 'este', 'esta', 'ese', 'esa', 'esto', 'eso',
+  'yo', 'tu', 'nos', 'les', 'me', 'te', 'se', 'lo',
+  'si', 'no', 'ya', 'muy', 'bien', 'mal', 'hola', 'buen',
+  'quiero', 'tengo', 'puede', 'puedo', 'saber', 'decir',
+  'sobre', 'donde', 'cuando', 'cual', 'tiene', 'hacer',
+  'gracias', 'buenas', 'buena', 'tardes', 'noches', 'dias',
+  'necesito', 'quisiera', 'ayuda', 'pregunta', 'duda',
+  'favor', 'informacion', 'queria', 'consulta',
+]);
+
 export async function getRelevantKBForBot(userMessage: string, maxEntries = 5) {
-  // Extract meaningful words (>3 chars) from the user message
+  const safeMax = Math.min(maxEntries, 20);
+
+  // Extract meaningful words filtering by stopwords instead of length
   const words = userMessage
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // strip accents
     .split(/\s+/)
-    .filter((w) => w.length > 3)
-    .slice(0, 6); // limit keywords
+    .filter((w) => w.length >= 3 && !BOT_STOPWORDS.has(w))
+    .slice(0, 6);
 
-  if (words.length === 0) {
-    return [];
+  // If keyword extraction produced results, search by keyword
+  if (words.length > 0) {
+    const orConditions = words.flatMap((word) => [
+      { question: { contains: word, mode: 'insensitive' as const } },
+      { answer: { contains: word, mode: 'insensitive' as const } },
+    ]);
+
+    const entries = await prisma.knowledgeBase.findMany({
+      where: {
+        active: true,
+        OR: orConditions,
+      },
+      take: safeMax,
+      orderBy: { sortOrder: 'asc' },
+      select: {
+        category: true,
+        question: true,
+        answer: true,
+      },
+    });
+
+    if (entries.length > 0) {
+      return entries;
+    }
   }
 
-  // Search for entries matching any keyword in question or answer
-  const orConditions = words.flatMap((word) => [
-    { question: { contains: word, mode: 'insensitive' as const } },
-    { answer: { contains: word, mode: 'insensitive' as const } },
-  ]);
-
-  const entries = await prisma.knowledgeBase.findMany({
-    where: {
-      active: true,
-      OR: orConditions,
-    },
-    take: maxEntries,
+  // Fallback: return top entries by sortOrder so the bot always has some KB context
+  console.warn('[KB] Fallback to top entries — no keyword match for:', words);
+  return prisma.knowledgeBase.findMany({
+    where: { active: true },
+    take: safeMax,
     orderBy: { sortOrder: 'asc' },
     select: {
       category: true,
@@ -192,6 +223,4 @@ export async function getRelevantKBForBot(userMessage: string, maxEntries = 5) {
       answer: true,
     },
   });
-
-  return entries;
 }

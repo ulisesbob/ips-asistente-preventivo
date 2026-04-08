@@ -199,3 +199,7 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #49 — res.json() en respuestas HTTP 204 tira SyntaxError
 **Error:** `apiFetch` llamaba `res.json()` incondicionalmente. Los endpoints DELETE devuelven HTTP 204 (sin body), lo que tiraba `SyntaxError: Unexpected end of JSON input`. El catch del frontend mostraba "Error al eliminar" pero el delete SÍ se ejecutaba en el backend. El usuario veía un error falso y la UI no se refrescaba.
 **Lección:** Siempre chequear el status code antes de parsear el body de una respuesta HTTP. 204 No Content no tiene body — retornar directamente sin llamar `.json()`. Aplica a todo fetch wrapper genérico.
+
+### #50 — Filtro de keywords por longitud descarta palabras válidas del dominio
+**Error:** `getRelevantKBForBot` filtraba keywords con `w.length > 3`, descartando palabras como "IPS" (3 chars), "DNI" (3 chars), "HIV" (3 chars). Si TODAS las palabras del mensaje eran cortas (ej: "¿Qué es el IPS?"), `words` quedaba vacío y la función retornaba `[]` sin consultar la DB. El bot nunca recibía contexto de la KB y decía "no tengo información".
+**Lección:** No filtrar keywords por longitud de caracteres — usar una lista de stopwords del idioma. Las siglas médicas/administrativas suelen ser cortas (3 chars) y son las más importantes. Además, siempre tener un fallback cuando la extracción de keywords produce 0 resultados: retornar las top N entries activas para que el bot tenga al menos algo de contexto.
