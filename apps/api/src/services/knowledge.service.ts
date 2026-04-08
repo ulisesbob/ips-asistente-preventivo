@@ -186,6 +186,8 @@ export async function getRelevantKBForBot(userMessage: string, maxEntries = 5) {
     .filter((w) => w.length >= 3 && !BOT_STOPWORDS.has(w))
     .slice(0, 6);
 
+  console.log('[KB] Keywords extracted:', words, 'from message:', userMessage.slice(0, 80));
+
   // If keyword extraction produced results, search by keyword
   if (words.length > 0) {
     const orConditions = words.flatMap((word) => [
@@ -207,6 +209,7 @@ export async function getRelevantKBForBot(userMessage: string, maxEntries = 5) {
       },
     });
 
+    console.log('[KB] Keyword match found:', entries.length, 'entries');
     if (entries.length > 0) {
       return entries;
     }
@@ -217,7 +220,7 @@ export async function getRelevantKBForBot(userMessage: string, maxEntries = 5) {
   return prisma.knowledgeBase.findMany({
     where: { active: true },
     take: safeMax,
-    orderBy: { sortOrder: 'asc' },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
     select: {
       category: true,
       question: true,

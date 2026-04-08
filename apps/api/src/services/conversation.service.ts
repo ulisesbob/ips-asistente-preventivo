@@ -371,7 +371,12 @@ async function handleChat(
   });
 
   // Debug: log what the AI will see
-  console.log(`[Bot] Patient ${patient.fullName} has ${patient.programs.length} active programs`);
+  console.log(`[Bot] Patient ${patient.fullName} has ${patient.programs.length} active programs, ${kbEntries.length} KB entries`);
+  if (kbEntries.length > 0) {
+    console.log('[Bot] KB entries:', kbEntries.map((e) => `[${e.category}] ${e.question.slice(0, 50)}`).join(' | '));
+  } else {
+    console.warn('[Bot] WARNING: No KB entries found for message:', text.slice(0, 80));
+  }
   if (patient.programs.length > 0) {
     patient.programs.forEach((pp) => {
       console.log(`[Bot]   - ${pp.program.name}: next=${pp.nextReminderDate}, last=${pp.lastControlDate}`);
