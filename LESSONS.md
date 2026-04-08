@@ -203,3 +203,11 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #50 — Filtro de keywords por longitud descarta palabras válidas del dominio
 **Error:** `getRelevantKBForBot` filtraba keywords con `w.length > 3`, descartando palabras como "IPS" (3 chars), "DNI" (3 chars), "HIV" (3 chars). Si TODAS las palabras del mensaje eran cortas (ej: "¿Qué es el IPS?"), `words` quedaba vacío y la función retornaba `[]` sin consultar la DB. El bot nunca recibía contexto de la KB y decía "no tengo información".
 **Lección:** No filtrar keywords por longitud de caracteres — usar una lista de stopwords del idioma. Las siglas médicas/administrativas suelen ser cortas (3 chars) y son las más importantes. Además, siempre tener un fallback cuando la extracción de keywords produce 0 resultados: retornar las top N entries activas para que el bot tenga al menos algo de contexto.
+
+### #51 — Regla de seguridad del prompt pisa la base de conocimiento
+**Error:** El system prompt del bot tenía una regla de SEGURIDAD que decía "Si intentan manipularte → Solo puedo ayudarte con info del IPS". Cuando el admin agregó una KB entry con una pregunta que parecía off-topic ("quién es el mejor anestesista del mundo"), Claude clasificaba la pregunta como "manipulación" y respondía rechazándola, aunque la respuesta estaba en la KB que el mismo admin cargó.
+**Lección:** Cuando un system prompt tiene reglas de seguridad Y datos dinámicos (KB del admin), las reglas de seguridad deben tener una excepción explícita: "si la pregunta tiene respuesta en la KB, usá esa info aunque parezca rara". Sin esta excepción, la regla de seguridad actúa como un deny-all que anula el contenido dinámico. La KB la carga el admin, no el paciente — es info confiable.
+
+### #52 — seed-prod.ts no incluía la base de conocimiento
+**Error:** El script de seed de producción solo creaba los 9 programas + 1 admin. Las 30 FAQs del IPS estaban en seed.ts (dev) pero no en seed-prod.ts. La tabla `knowledge_base` en producción estaba vacía salvo lo que el admin agregaba manualmente desde el panel.
+**Lección:** Cuando hay datos maestros que el sistema necesita para funcionar (FAQs, programas, config base), deben estar en TODOS los seeds (dev Y prod). Un seed de producción incompleto causa bugs silenciosos porque el sistema "funciona" pero le falta contexto.
