@@ -181,6 +181,7 @@ export async function getRelevantKBForBot(userMessage: string, maxEntries = 5) {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // strip accents
+    .replace(/[^a-z0-9\s]/g, '')    // strip punctuation so "ips?" becomes "ips"
     .split(/\s+/)
     .filter((w) => w.length >= 3 && !BOT_STOPWORDS.has(w))
     .slice(0, 6);
