@@ -16,6 +16,7 @@ export interface CreateSelfReminderInput {
   description: string;
   date: string;      // YYYY-MM-DD
   time: string;      // HH:MM
+  recurring?: boolean;
 }
 
 export interface SelfReminderResult {
@@ -95,6 +96,7 @@ export async function createSelfReminder(
   }
 
   // Create
+  const isRecurring = input.recurring === true;
   const reminder = await prisma.patientSelfReminder.create({
     data: {
       patientId,
@@ -102,6 +104,7 @@ export async function createSelfReminder(
       reminderDate,
       reminderHour: hour,
       reminderMinute: roundedMinute,
+      recurring: isRecurring,
     },
     select: {
       id: true,
@@ -109,10 +112,11 @@ export async function createSelfReminder(
       reminderDate: true,
       reminderHour: true,
       reminderMinute: true,
+      recurring: true,
     },
   });
 
-  return { success: true, message: 'Recordatorio creado.', reminder };
+  return { success: true, message: isRecurring ? 'Recordatorio diario creado.' : 'Recordatorio creado.', reminder };
 }
 
 // ─── LIST ACTIVE ──────────────────────────────────────────────────────────────
@@ -128,6 +132,7 @@ export async function listActiveSelfReminders(patientId: string) {
       reminderDate: true,
       reminderHour: true,
       reminderMinute: true,
+      recurring: true,
     },
   });
 }
@@ -172,6 +177,7 @@ export async function listSelfRemindersForPanel(patientId: string) {
       reminderDate: true,
       reminderHour: true,
       reminderMinute: true,
+      recurring: true,
       status: true,
       createdAt: true,
     },
@@ -227,6 +233,7 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
       reminderDate: true,
       reminderHour: true,
       reminderMinute: true,
+      recurring: true,
       patient: {
         select: {
           fullName: true,
@@ -261,10 +268,21 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
 
     try {
       await sendTextMessage(sendPhone, message);
-      await prisma.patientSelfReminder.update({
-        where: { id: r.id },
-        data: { status: SelfReminderStatus.SENT },
-      });
+      if (r.recurring) {
+        // Recurring: advance date to tomorrow, keep PENDING
+        const nextDate = new Date(r.reminderDate);
+        nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+        await prisma.patientSelfReminder.update({
+          where: { id: r.id },
+          data: { reminderDate: nextDate },
+        });
+      } else {
+        // One-time: mark as SENT
+        await prisma.patientSelfReminder.update({
+          where: { id: r.id },
+          data: { status: SelfReminderStatus.SENT },
+        });
+      }
       sent++;
     } catch (err) {
       console.error(`[SelfReminder] Error sending to ${sendPhone}:`, err);
@@ -332,6 +350,7 @@ export function parseSelfReminderTag(
       description: String(parsed.descripcion || parsed.description || '').trim(),
       date: String(parsed.fecha || parsed.date || '').trim(),
       time: String(parsed.hora || parsed.time || '').trim(),
+      recurring: parsed.recurrente === true || parsed.recurring === true,
     };
 
     if (!data.description || !data.date || !data.time) {
@@ -381,7 +400,7 @@ export function parseCancelReminderTag(
  * Formats a list of reminders for display in WhatsApp.
  */
 export function formatRemindersForWhatsApp(
-  reminders: Array<{ description: string; reminderDate: Date; reminderHour: number; reminderMinute: number }>
+  reminders: Array<{ description: string; reminderDate: Date; reminderHour: number; reminderMinute: number; recurring?: boolean }>
 ): string {
   if (reminders.length === 0) {
     return 'No tenés recordatorios activos. Podés crear uno diciéndome, por ejemplo: "Recordame el turno del dentista el lunes a las 9".';
@@ -393,7 +412,8 @@ export function formatRemindersForWhatsApp(
       timeZone: 'America/Argentina/Buenos_Aires',
     }).format(r.reminderDate);
     const time = `${String(r.reminderHour).padStart(2, '0')}:${String(r.reminderMinute).padStart(2, '0')}`;
-    return `${i + 1}. 📌 *${r.description}* — ${date} a las ${time}`;
+    const recurTag = r.recurring ? ' 🔁 (diario)' : '';
+    return `${i + 1}. 📌 *${r.description}* — ${date} a las ${time}${recurTag}`;
   });
 
   return `Tus recordatorios activos:\n\n${lines.join('\n')}\n\nPara cancelar uno, decime "cancelar recordatorio" y el número.`;

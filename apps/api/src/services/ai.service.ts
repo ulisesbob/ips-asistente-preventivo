@@ -32,6 +32,7 @@ interface SelfReminderInfo {
   reminderDate: Date;
   reminderHour: number;
   reminderMinute: number;
+  recurring?: boolean;
 }
 
 interface PatientContext {
@@ -97,13 +98,19 @@ TONO:
 - Nada de emojis excesivos. Máximo 1 por mensaje si viene al caso.
 
 RECORDATORIOS PERSONALES:
-- El paciente puede pedirte que le recuerdes algo. Ejemplos: "recordame el turno del dentista el martes a las 9", "avisame el 20 de abril que tengo que llevar los análisis".
-- Cuando el paciente pida un recordatorio, extraé la descripción, fecha y hora. Si no especifica hora, usá 09:00.
+- El paciente puede pedirte que le recuerdes algo. Ejemplos: "recordame el turno del dentista el martes a las 9", "avisame el 20 de abril que tengo que llevar los análisis", "todos los días a las 8 recordame tomar la insulina".
+- Cuando el paciente pida un recordatorio, extraé la descripción, fecha y hora. Si no especifica hora, usá 09:00. Si no especifica fecha, usá la fecha de hoy.
+- Si el paciente pide un recordatorio DIARIO/TODOS LOS DÍAS/RECURRENTE, agregá "recurrente":true al tag. El sistema se encarga de repetirlo todos los días automáticamente.
 - Respondé con un mensaje de confirmación amigable Y agregá al final del mensaje (en una línea separada, sin explicar qué es) este tag EXACTO:
   <<SELF_REMINDER:{"descripcion":"DESCRIPCION","fecha":"YYYY-MM-DD","hora":"HH:MM"}>>
-- EJEMPLO: si dice "recordame el turno del dentista el 15 de abril a las 10", respondé algo como:
+  Para recordatorios diarios:
+  <<SELF_REMINDER:{"descripcion":"DESCRIPCION","fecha":"YYYY-MM-DD","hora":"HH:MM","recurrente":true}>>
+- EJEMPLO puntual: "recordame el turno del dentista el 15 de abril a las 10" →
   "Listo, te voy a recordar lo del turno del dentista el 15/04 a las 10:00."
-  y en la última línea: <<SELF_REMINDER:{"descripcion":"Turno del dentista","fecha":"2026-04-15","hora":"10:00"}>>
+  <<SELF_REMINDER:{"descripcion":"Turno del dentista","fecha":"2026-04-15","hora":"10:00"}>>
+- EJEMPLO diario: "todos los días a las 8 recordame tomar la insulina" →
+  "Listo, te voy a mandar un recordatorio todos los días a las 8:00 para tomar la insulina."
+  <<SELF_REMINDER:{"descripcion":"Tomar insulina","fecha":"2026-04-10","hora":"08:00","recurrente":true}>>
 - Si dice "mis recordatorios" o "qué recordatorios tengo" → respondé normalmente Y agregá: <<LIST_REMINDERS>>
 - Si dice "cancelar recordatorio 2" o "borrá el recordatorio 3" → respondé confirmando Y agregá: <<CANCEL_REMINDER:N>> donde N es el número.
 - Si no entendés la fecha o falta info, preguntale al paciente. NO pongas el tag si no tenés todos los datos.
@@ -184,7 +191,8 @@ export function buildSystemPrompt(patient?: PatientContext): string {
         patient.selfReminders
           .map((r, i) => {
             const safeDesc = r.description.replace(/[\n\r\\]/g, '').slice(0, 200);
-            return `${i + 1}. "${safeDesc}" — ${formatDateAR(r.reminderDate)} a las ${String(r.reminderHour).padStart(2, '0')}:${String(r.reminderMinute).padStart(2, '0')}`;
+            const recurLabel = r.recurring ? ' (DIARIO)' : '';
+            return `${i + 1}. "${safeDesc}" — ${formatDateAR(r.reminderDate)} a las ${String(r.reminderHour).padStart(2, '0')}:${String(r.reminderMinute).padStart(2, '0')}${recurLabel}`;
           })
           .join('\n') +
         `\nTotal: ${patient.selfReminders.length}/10 recordatorios activos.`

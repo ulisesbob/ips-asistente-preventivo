@@ -20,6 +20,7 @@ describe('parseSelfReminderTag', () => {
       description: 'Turno del dentista',
       date: '2026-04-15',
       time: '10:00',
+      recurring: false,
     });
     expect(result.cleanResponse).toBe('Listo, te voy a recordar lo del turno.');
   });

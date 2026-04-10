@@ -259,6 +259,7 @@ model PatientSelfReminder {
   reminderDate   DateTime           @db.Date
   reminderHour   Int                @db.SmallInt
   reminderMinute Int                @default(0) @db.SmallInt
+  recurring      Boolean            @default(false)
   status         SelfReminderStatus @default(PENDING)
   createdAt      DateTime           @default(now()) @db.Timestamptz()
 
