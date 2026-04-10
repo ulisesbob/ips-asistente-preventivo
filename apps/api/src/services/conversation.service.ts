@@ -404,6 +404,22 @@ async function handleReminderFlow(
   text: string,
   state: ReminderFlowState
 ): Promise<void> {
+  // Allow escalation even mid-flow (regression fix: flow was blocking escalation)
+  const textLower = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (ESCALATION_KEYWORDS.some((kw) => textLower.includes(kw))) {
+    reminderFlowState.delete(phone);
+    await handleEscalation(phone, e164Phone, patientId, text);
+    return;
+  }
+
+  // "cancelar" exits the flow
+  if (textLower === 'cancelar' || textLower === 'salir') {
+    reminderFlowState.delete(phone);
+    const msg = 'Listo, se canceló la creación del recordatorio. ¿En qué puedo ayudarte?';
+    await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
+    return;
+  }
+
   // Step 1: Got description → ask for time
   if (state.step === 'AWAITING_DESCRIPTION') {
     const desc = text.trim();
