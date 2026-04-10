@@ -38,6 +38,12 @@ enum ReminderStatus {
   FAILED
 }
 
+enum SelfReminderStatus {
+  PENDING
+  SENT
+  CANCELLED
+}
+
 enum ConversationStatus {
   OPEN
   ESCALATED
@@ -100,6 +106,7 @@ model Patient {
   notes                PatientNote[]
   surveys              Survey[]
   medicationReminders  MedicationReminder[]
+  selfReminders        PatientSelfReminder[]
 
   // phone already has @unique which creates an index — no separate @@index needed
   @@index([fullName])
@@ -243,6 +250,23 @@ model Survey {
   @@index([patientProgramId])
   @@index([completedAt])
   @@map("surveys")
+}
+
+model PatientSelfReminder {
+  id             String             @id @default(uuid()) @db.Uuid
+  patientId      String             @db.Uuid
+  description    String             @db.VarChar(200)
+  reminderDate   DateTime           @db.Date
+  reminderHour   Int                @db.SmallInt
+  reminderMinute Int                @default(0) @db.SmallInt
+  status         SelfReminderStatus @default(PENDING)
+  createdAt      DateTime           @default(now()) @db.Timestamptz()
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId, status])
+  @@index([status, reminderDate, reminderHour, reminderMinute])
+  @@map("patient_self_reminders")
 }
 
 model MedicationReminder {

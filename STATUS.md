@@ -1,13 +1,13 @@
 # Estado del Proyecto
 
 ## Estado actual
-- **Último paso completado:** Paso 18 + todas las features extras
+- **Último paso completado:** Paso 19 — Recordatorios autogestivos del paciente
 - **Estado:** PRODUCCIÓN ACTIVA — Render (API) + Vercel (Panel) + WhatsApp Bot
 - **Bot:** Sonnet 4.6 con retry + fallback Haiku, personalidad "Ana", 30 FAQs reales IPS
 - **UptimeRobot:** Configurado — ping cada 5 min a /health
-- **Bloqueadores:** Ninguno activo
+- **Bloqueadores:** Ninguno activo (requiere deploy para activar migración)
 
-## Features implementadas (24 en total)
+## Features implementadas (25 en total)
 
 | # | Feature | Estado |
 |---|---------|--------|
@@ -29,12 +29,14 @@
 | 16 | Base de conocimiento (30 FAQs reales IPS) | ✅ |
 | 17 | Derivación a humano (escalamiento) | ✅ |
 | 18 | Encuestas post-control | ✅ |
+| 19 | Recordatorios autogestivos del paciente | ✅ |
 | — | Recordatorios de medicación diarios | ✅ |
 | — | Bot Sonnet 4.6 + personalidad "Ana" | ✅ |
 | — | KB con datos reales de ipsmisiones.com.ar | ✅ |
 | — | Deduplicación de webhooks Meta | ✅ |
 | — | Retry Sonnet 2x + fallback Haiku | ✅ |
 | — | Inscripción a programas → derivación presencial | ✅ |
+| — | Recordatorios autogestivos via bot (lenguaje natural) | ✅ |
 
 ## Bot — Capacidades actuales
 - Responde preguntas de coberturas, trámites, programas, urgencias (30 FAQs reales)
@@ -56,6 +58,7 @@
 | Recordatorios de controles | Diario 8:00 AM Argentina | Envía WA a pacientes con nextReminderDate vencida |
 | Recordatorios de medicación | Cada 30 min | Envía WA según hora configurada por médico |
 | Encuestas post-control | Diario 10:00 AM Argentina | Envía encuesta WA 24h después de control marcado |
+| Recordatorios autogestivos | Cada 30 min | Envía recordatorios creados por pacientes vía bot |
 
 ## Infra
 - API: Render (Docker, node:20-alpine, dumb-init) + UptimeRobot keep-alive
@@ -66,7 +69,7 @@
 - Monitoreo: UptimeRobot (ping /health cada 5 min)
 
 ## Testing
-- **140 tests unitarios**, 9 archivos, todo verde
+- **179 tests unitarios**, 10 archivos, todo verde
 - Cobertura: auth, middleware, phone normalization, CSV sanitization, escalation detection, survey parsing, medication slots, KB keywords
 
 ## Seguridad — Auditorías completadas
@@ -75,7 +78,8 @@
 - 1 análisis profundo de frontend (11 bugs encontrados y resueltos)
 - 1 análisis profundo de backend (12 bugs encontrados y resueltos)
 - react-doctor: 97/100 (0 errores)
-- 48 lecciones documentadas en LESSONS.md
+- 52 lecciones documentadas en LESSONS.md
+- Code review Paso 19: 3 HIGH + 1 MEDIUM corregidos
 
 ## Pendientes para próxima sesión
 1. ~~**Token permanente de WhatsApp**~~ — ✅ Configurado en Render (2026-04-05)
@@ -93,3 +97,4 @@
 | 2026-03-31 | Bug fixes: Deduplicación webhooks Meta, retry Sonnet + fallback Haiku, phone normalization, ESCALATED guards, survey dispatchedAt, birthDate UTC |
 | 2026-03-31 | Reviews: 5 code reviews, 2 security audits, 2 deep bug hunts (frontend + backend), 140 tests |
 | 2026-03-31 | Infra: UptimeRobot configurado, escalabilidad 500 pacientes simultáneos, PDF presentación generado |
+| 2026-04-10 | Paso 19: Recordatorios autogestivos del paciente (bot crea/lista/cancela via lenguaje natural, cron cada 30 min, 18 tests, code review 4 fixes) |

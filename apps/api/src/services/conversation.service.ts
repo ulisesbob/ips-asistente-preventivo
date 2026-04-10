@@ -11,6 +11,16 @@ import { getLatestNotesForBot } from './note.service';
 import { getRelevantKBForBot } from './knowledge.service';
 import { processSurveyResponse } from './survey.service';
 import { getMedicationsForBot } from './medication-reminder.service';
+import {
+  getSelfRemindersForBot,
+  createSelfReminder,
+  listActiveSelfReminders,
+  cancelSelfReminder,
+  parseSelfReminderTag,
+  parseListRemindersTag,
+  parseCancelReminderTag,
+  formatRemindersForWhatsApp,
+} from './self-reminder.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -348,11 +358,12 @@ async function handleChat(
   },
   text: string
 ): Promise<void> {
-  // Fetch context for AI: notes + KB + medications
-  const [notes, kbEntries, medications] = await Promise.all([
+  // Fetch context for AI: notes + KB + medications + self-reminders
+  const [notes, kbEntries, medications, selfReminders] = await Promise.all([
     getLatestNotesForBot(patient.id),
     getRelevantKBForBot(text),
     getMedicationsForBot(patient.id),
+    getSelfRemindersForBot(patient.id),
   ]);
 
   // Build system prompt with patient context + notes
@@ -368,6 +379,7 @@ async function handleChat(
     notes,
     knowledgeBase: kbEntries,
     medications,
+    selfReminders,
   });
 
   // Debug: log what the AI will see
@@ -425,6 +437,36 @@ async function handleChat(
         'No tengo acceso a esa información. ' +
         '¿Hay algo más en lo que pueda ayudarte?\n\n' +
         'Esta información es orientativa. Para consultas sobre su caso, comuníquese al 0800-888-0109.';
+    }
+  }
+
+  // ─── Self-reminder tag processing ──────────────────────────────────────────
+  // Parse and handle self-reminder tags BEFORE sending the response
+
+  // 1. Check for create-reminder tag
+  const reminderTag = parseSelfReminderTag(aiResponse);
+  if (reminderTag.found && reminderTag.data) {
+    aiResponse = reminderTag.cleanResponse;
+    const result = await createSelfReminder(patient.id, reminderTag.data);
+    if (!result.success) {
+      aiResponse += `\n\n⚠️ ${result.message}`;
+    }
+  }
+
+  // 2. Check for list-reminders tag
+  const listTag = parseListRemindersTag(aiResponse);
+  if (listTag.found) {
+    const reminders = await listActiveSelfReminders(patient.id);
+    aiResponse = listTag.cleanResponse + '\n\n' + formatRemindersForWhatsApp(reminders);
+  }
+
+  // 3. Check for cancel-reminder tag
+  const cancelTag = parseCancelReminderTag(aiResponse);
+  if (cancelTag.found && cancelTag.index !== undefined) {
+    const result = await cancelSelfReminder(patient.id, cancelTag.index);
+    aiResponse = cancelTag.cleanResponse;
+    if (!result.success) {
+      aiResponse += `\n\n⚠️ ${result.message}`;
     }
   }
 

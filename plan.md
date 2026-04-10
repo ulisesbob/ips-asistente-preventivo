@@ -141,3 +141,14 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Bot: parsear respuestas y guardar en la tabla
 - [x] Panel: sección "Encuestas" en dashboard con métricas de satisfacción
 - [x] API: GET /api/dashboard/surveys (stats de satisfacción)
+
+### Paso 19 — Recordatorios autogestivos del paciente ✅
+- [x] Nueva tabla `patient_self_reminders` (id, patientId, description, reminderDate, reminderHour, reminderMinute, status, createdAt)
+- [x] Service: crear, listar activos, cancelar, procesar vencidos (max 10 activos por paciente)
+- [x] Cron: cada 30 min envía recordatorios vencidos vía WhatsApp
+- [x] AI: system prompt con instrucciones para detectar intención de recordatorio + tag estructurado
+- [x] Bot: parsear tag `<<SELF_REMINDER:...>>` del AI, crear recordatorio, confirmar al paciente
+- [x] Bot: "mis recordatorios" → listar activos, "cancelar recordatorio N" → cancelar
+- [x] Panel: GET /api/patients/:id/self-reminders (solo lectura, respeta permisos)
+- [x] Tests: 18 tests de parsing tags, validación fechas, límites, cancelación
+- [x] Code review: 3 HIGH + 1 MEDIUM arreglados (regex, retry cap 48h, falsy index, CHECK constraints)

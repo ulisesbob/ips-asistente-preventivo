@@ -4,6 +4,7 @@ import { validate } from '../middleware/validate';
 import { requireAuth, requireAdmin } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error-handler';
 import * as patientService from '../services/patient.service';
+import { listSelfRemindersForPanel } from '../services/self-reminder.service';
 import { Role, PatientProgramStatus, Gender } from '@ips/db';
 
 const router = Router();
@@ -213,6 +214,27 @@ router.patch(
     res.status(200).json({
       status: 'ok',
       data: { patient },
+    });
+  })
+);
+
+// ─── GET /api/patients/:id/self-reminders ───────────────────────────────────
+
+router.get(
+  '/:id/self-reminders',
+  requireAuth,
+  validate(idParamsSchema, 'params'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params as z.infer<typeof idParamsSchema>;
+
+    // Access check: reuse getPatientById which verifies doctor access
+    await patientService.getPatientById(id, req.doctor!.id, req.doctor!.role as Role);
+
+    const reminders = await listSelfRemindersForPanel(id);
+
+    res.status(200).json({
+      status: 'ok',
+      data: { reminders },
     });
   })
 );
