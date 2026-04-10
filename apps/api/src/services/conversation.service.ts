@@ -36,6 +36,13 @@ const ESCALATION_KEYWORDS = [
   'necesito ayuda', 'no me sirve', 'reclamar', 'reclamo', 'queja',
 ];
 
+// Reminder keywords — patient wants to set a daily reminder (pre-normalized, no accents)
+const REMINDER_KEYWORDS = [
+  'recordame', 'recordatorio', 'avisame', 'recuerdame',
+  'quiero un recordatorio', 'poneme un recordatorio',
+  'todos los dias', 'cada dia',
+];
+
 // Shared phone normalization for Argentina (LESSONS #40)
 function toSendablePhone(phone: string): string {
   let p = phone.startsWith('+') ? phone.slice(1) : phone;
@@ -54,17 +61,29 @@ interface ConversationState {
   createdAt: number;
 }
 
+interface ReminderFlowState {
+  step: 'AWAITING_DESCRIPTION' | 'AWAITING_TIME';
+  description?: string;
+  createdAt: number;
+}
+
 // In-memory state for registration flows (keyed by phone).
 // This is safe because registration is a short-lived flow (2-3 messages).
 // If the server restarts mid-registration, the user just starts over.
 const registrationState = new Map<string, ConversationState>();
+const reminderFlowState = new Map<string, ReminderFlowState>();
 
-// Periodic cleanup of stale registration entries
+// Periodic cleanup of stale entries
 setInterval(() => {
   const now = Date.now();
   for (const [phone, state] of registrationState.entries()) {
     if (now - state.createdAt > REGISTRATION_TTL_MS) {
       registrationState.delete(phone);
+    }
+  }
+  for (const [phone, state] of reminderFlowState.entries()) {
+    if (now - state.createdAt > REGISTRATION_TTL_MS) {
+      reminderFlowState.delete(phone);
     }
   }
 }, 10 * 60 * 1000); // every 10 minutes
@@ -153,7 +172,14 @@ export async function handleIncomingMessage(
       return;
     }
 
-    // 6. Check for escalation keywords
+    // 6. Check for active reminder flow (step-by-step, no AI needed)
+    const reminderFlow = reminderFlowState.get(normalizedPhone);
+    if (reminderFlow) {
+      await handleReminderFlow(normalizedPhone, e164Phone, patient.id, text, reminderFlow);
+      return;
+    }
+
+    // 7. Check for escalation keywords
     const textLower = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const wantsHuman = ESCALATION_KEYWORDS.some((kw) => textLower.includes(kw));
 
@@ -162,7 +188,14 @@ export async function handleIncomingMessage(
       return;
     }
 
-    // 6. Normal chat mode
+    // 8. Check for reminder intent keywords → start reminder flow
+    const wantsReminder = REMINDER_KEYWORDS.some((kw) => textLower.includes(kw));
+    if (wantsReminder) {
+      await startReminderFlow(normalizedPhone, e164Phone, patient.id, text);
+      return;
+    }
+
+    // 9. Normal chat mode
     await handleChat(normalizedPhone, e164Phone, patient, text);
     return;
   }
@@ -339,6 +372,113 @@ async function handleRegistration(
     await sendTextMessage(toSendablePhone(phone), welcome);
     return;
   }
+}
+
+// ─── Reminder Flow (step-by-step, no AI) ─────────────────────────────────────
+
+async function startReminderFlow(
+  phone: string,
+  e164Phone: string,
+  patientId: string,
+  text: string
+): Promise<void> {
+  const msg =
+    '¿Qué querés que te recuerde? Escribí una descripción corta.\n\n' +
+    'Ejemplo: "Tomar insulina", "Tomar pastilla presión"';
+
+  await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
+  reminderFlowState.set(phone, { step: 'AWAITING_DESCRIPTION', createdAt: Date.now() });
+}
+
+async function handleReminderFlow(
+  phone: string,
+  e164Phone: string,
+  patientId: string,
+  text: string,
+  state: ReminderFlowState
+): Promise<void> {
+  // Step 1: Got description → ask for time
+  if (state.step === 'AWAITING_DESCRIPTION') {
+    const desc = text.trim();
+    if (desc.length < 2 || desc.length > 200) {
+      const retry = 'La descripción debe tener entre 2 y 200 caracteres. ¿Qué querés que te recuerde?';
+      await sendTextMessage(toSendablePhone(phone), retry);
+      return;
+    }
+
+    reminderFlowState.set(phone, {
+      step: 'AWAITING_TIME',
+      description: desc,
+      createdAt: state.createdAt,
+    });
+
+    const msg = `Perfecto: "${desc}"\n\n¿A qué hora querés que te avise todos los días? (formato: HH:MM, ejemplo: 08:00, 14:30)`;
+    await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
+    return;
+  }
+
+  // Step 2: Got time → create the self-reminder as recurring
+  if (state.step === 'AWAITING_TIME') {
+    const timeText = text.trim();
+    const timeMatch = timeText.match(/(\d{1,2})[:\.](\d{2})/);
+
+    if (!timeMatch) {
+      const retry = 'No entendí la hora. Escribí en formato HH:MM, por ejemplo: 08:00, 14:30, 21:00';
+      await sendTextMessage(toSendablePhone(phone), retry);
+      return;
+    }
+
+    const hour = parseInt(timeMatch[1]);
+    const minute = parseInt(timeMatch[2]);
+
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      const retry = 'La hora debe ser entre 00:00 y 23:59. Intentá de nuevo:';
+      await sendTextMessage(toSendablePhone(phone), retry);
+      return;
+    }
+
+    // Round minute to nearest 30 (cron runs every 30 min)
+    const roundedMinute = minute < 15 ? 0 : 30;
+
+    // Create the recurring self-reminder starting today
+    const todayStr = getTodayArgentinaStr();
+    const result = await createSelfReminder(patientId, {
+      description: state.description!,
+      date: todayStr,
+      time: `${String(hour).padStart(2, '0')}:${String(roundedMinute).padStart(2, '0')}`,
+      recurring: true,
+    });
+
+    reminderFlowState.delete(phone);
+
+    const timeDisplay = `${String(hour).padStart(2, '0')}:${String(roundedMinute).padStart(2, '0')}`;
+
+    if (result.success) {
+      const msg =
+        `Listo! Te voy a recordar *"${state.description}"* todos los días a las ${timeDisplay} hs.\n\n` +
+        `Para ver tus recordatorios escribí "mis recordatorios". Para cancelar uno, escribí "cancelar recordatorio" y el número.`;
+      await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
+    } else {
+      const msg = `No pude crear el recordatorio: ${result.message}`;
+      await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
+    }
+    return;
+  }
+}
+
+/**
+ * Returns today's date in Argentina as YYYY-MM-DD string.
+ */
+function getTodayArgentinaStr(): string {
+  const argFormatter = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: 'America/Argentina/Buenos_Aires',
+  });
+  const parts = argFormatter.formatToParts(new Date());
+  const y = parts.find((p) => p.type === 'year')?.value ?? '2026';
+  const m = parts.find((p) => p.type === 'month')?.value ?? '01';
+  const d = parts.find((p) => p.type === 'day')?.value ?? '01';
+  return `${y}-${m}-${d}`;
 }
 
 // ─── Chat Mode ────────────────────────────────────────────────────────────────
