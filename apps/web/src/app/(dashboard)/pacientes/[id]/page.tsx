@@ -25,7 +25,6 @@ import {
   Pencil,
   Pill,
   Trash2,
-  AlarmClock,
 } from 'lucide-react';
 
 interface PatientDetail {
@@ -88,23 +87,6 @@ interface MedReminder {
   doctor: { fullName: string } | null;
 }
 
-interface SelfReminderItem {
-  id: string;
-  description: string;
-  reminderDate: string;
-  reminderHour: number;
-  reminderMinute: number;
-  recurring: boolean;
-  status: 'PENDING' | 'SENT' | 'CANCELLED';
-  createdAt: string;
-}
-
-const SELF_REMINDER_STATUS = {
-  PENDING: { label: 'Pendiente', className: 'text-amber-600' },
-  SENT: { label: 'Enviado', className: 'text-emerald-600' },
-  CANCELLED: { label: 'Cancelado', className: 'text-slate-400' },
-};
-
 const STATUS_CONFIG = {
   ACTIVE: { label: 'Activo', icon: Play, className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   PAUSED: { label: 'Pausado', icon: Pause, className: 'bg-amber-50 text-amber-700 border-amber-200' },
@@ -135,7 +117,6 @@ export default function PatientDetailPage() {
   const [editForm, setEditForm] = useState({ fullName: '', phone: '', birthDate: '', gender: '' });
   const [editLoading, setEditLoading] = useState(false);
   const [meds, setMeds] = useState<MedReminder[]>([]);
-  const [selfReminders, setSelfReminders] = useState<SelfReminderItem[]>([]);
   const [showMedDialog, setShowMedDialog] = useState(false);
   const [medForm, setMedForm] = useState({ medicationName: '', dosage: '', reminderHour: 8, reminderMinute: 0 });
   const [medSaving, setMedSaving] = useState(false);
@@ -207,13 +188,6 @@ export default function PatientDetailPage() {
     } catch { /* handled */ }
   }, [id]);
 
-  const fetchSelfReminders = useCallback(async () => {
-    try {
-      const result = await apiGet<{ reminders: SelfReminderItem[] }>(`/api/patients/${id}/self-reminders`);
-      setSelfReminders(result.reminders);
-    } catch { /* handled */ }
-  }, [id]);
-
   async function handleCreateMed() {
     if (!medForm.medicationName.trim() || !medForm.dosage.trim()) return;
     setMedSaving(true);
@@ -252,8 +226,7 @@ export default function PatientDetailPage() {
     fetchPatient();
     fetchNotes(1);
     fetchMeds();
-    fetchSelfReminders();
-  }, [fetchPatient, fetchNotes, fetchMeds, fetchSelfReminders]);
+  }, [fetchPatient, fetchNotes, fetchMeds]);
 
   async function openEnrollDialog() {
     try {
@@ -764,7 +737,11 @@ export default function PatientDetailPage() {
                   <span className="text-xs text-muted-foreground ml-3">
                     ⏰ {String(med.reminderHour).padStart(2, '0')}:{String(med.reminderMinute).padStart(2, '0')} hs
                   </span>
-                  <span className="text-xs text-muted-foreground ml-2">({med.doctor ? med.doctor.fullName : 'Paciente'})</span>
+                  {med.doctor ? (
+                    <span className="text-xs text-muted-foreground ml-2">({med.doctor.fullName})</span>
+                  ) : (
+                    <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200">Creado por el paciente</span>
+                  )}
                 </div>
                 <div className="flex gap-1">
                   <button
@@ -859,67 +836,6 @@ export default function PatientDetailPage() {
           </div>
         </div>
       )}
-
-      {/* Self-reminders (created by patient via bot) */}
-      <div className="bg-white rounded-lg border border-border">
-        <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-sm font-medium text-foreground flex items-center gap-2">
-            <AlarmClock className="w-4 h-4" />
-            Recordatorios del paciente ({selfReminders.length})
-          </h2>
-          <p className="text-xs text-muted-foreground mt-1">
-            Creados por el paciente desde WhatsApp
-          </p>
-        </div>
-        {selfReminders.length === 0 ? (
-          <p className="px-5 py-8 text-sm text-muted-foreground text-center">
-            El paciente no creó recordatorios desde el bot
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border bg-slate-50/50">
-                  <th className="text-left text-xs font-medium text-muted-foreground px-4 py-2">Descripción</th>
-                  <th className="text-left text-xs font-medium text-muted-foreground px-4 py-2">Fecha</th>
-                  <th className="text-left text-xs font-medium text-muted-foreground px-4 py-2">Hora</th>
-                  <th className="text-left text-xs font-medium text-muted-foreground px-4 py-2">Estado</th>
-                  <th className="text-left text-xs font-medium text-muted-foreground px-4 py-2">Creado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {selfReminders.map((sr) => {
-                  const srs = SELF_REMINDER_STATUS[sr.status] || SELF_REMINDER_STATUS.PENDING;
-                  return (
-                    <tr key={sr.id} className={sr.status === 'CANCELLED' ? 'opacity-50' : ''}>
-                      <td className="px-4 py-2 text-sm font-medium">
-                        <div className="flex items-center gap-2">
-                          <span>{sr.description}</span>
-                          {sr.recurring && (
-                            <span className="inline-flex text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200 whitespace-nowrap">Diario</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-2 text-sm text-muted-foreground tabular-nums">
-                        {sr.recurring ? 'Todos los días' : formatDate(sr.reminderDate)}
-                      </td>
-                      <td className="px-4 py-2 text-sm text-muted-foreground tabular-nums">
-                        {String(sr.reminderHour).padStart(2, '0')}:{String(sr.reminderMinute).padStart(2, '0')}
-                      </td>
-                      <td className="px-4 py-2">
-                        <span className={`text-xs font-medium ${srs.className}`}>{srs.label}</span>
-                      </td>
-                      <td className="px-4 py-2 text-xs text-muted-foreground tabular-nums">
-                        {formatDateTime(sr.createdAt)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
 
       {/* Notes */}
       <div className="bg-white rounded-lg border border-border">
