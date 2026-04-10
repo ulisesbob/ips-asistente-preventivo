@@ -215,3 +215,7 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #53 — .trim() antes de CSV injection regex anula la detección de \t y \r
 **Error:** En `createSelfReminder`, se hacía `input.description.trim()` ANTES de `CSV_INJECTION_REGEX.test(desc)`. El regex incluía `\t` y `\r` como chars peligrosos, pero `.trim()` ya los removía. Un input `"\tCMD('calc')"` pasaba la validación porque trim lo convertía en `"CMD('calc')"`.
 **Lección:** Cuando se valida contra caracteres que `.trim()` remueve (tab, CR, LF), ejecutar la validación de seguridad ANTES del trim, sobre el input crudo. Orden correcto: (1) validar seguridad en raw, (2) trim, (3) validar longitud/formato en trimmed.
+
+### #54 — Regla de medicación pisa la nueva feature de recordatorios personales
+**Error:** El system prompt tenía "Si preguntan por medicación que no tienen configurada → deciles que consulten con su médico". Cuando el paciente decía "Quiero hacer un recordatorio para mi medicación", Claude matcheaba la palabra "medicación" con esta regla y lo derivaba al médico, ignorando la sección de RECORDATORIOS PERSONALES.
+**Lección:** Es el mismo patrón que #51: cuando se agrega una nueva capacidad al bot, revisar TODAS las reglas existentes del prompt y agregar excepciones explícitas donde la nueva capacidad se superpone con una regla vieja. Si una regla dice "derivar al médico" pero la nueva feature permite que el paciente lo haga solo, la regla necesita una EXCEPCIÓN.
