@@ -85,7 +85,7 @@ interface MedReminder {
   reminderHour: number;
   reminderMinute: number;
   active: boolean;
-  doctor: { fullName: string };
+  doctor: { fullName: string } | null;
 }
 
 interface SelfReminderItem {
@@ -764,7 +764,7 @@ export default function PatientDetailPage() {
                   <span className="text-xs text-muted-foreground ml-3">
                     ⏰ {String(med.reminderHour).padStart(2, '0')}:{String(med.reminderMinute).padStart(2, '0')} hs
                   </span>
-                  <span className="text-xs text-muted-foreground ml-2">({med.doctor.fullName})</span>
+                  <span className="text-xs text-muted-foreground ml-2">({med.doctor ? med.doctor.fullName : 'Paciente'})</span>
                 </div>
                 <div className="flex gap-1">
                   <button

@@ -10,7 +10,7 @@ import { generateResponse, buildSystemPrompt, ChatMessage } from './ai.service';
 import { getLatestNotesForBot } from './note.service';
 import { getRelevantKBForBot } from './knowledge.service';
 import { processSurveyResponse } from './survey.service';
-import { getMedicationsForBot } from './medication-reminder.service';
+import { getMedicationsForBot, createMedReminderFromBot } from './medication-reminder.service';
 import {
   getSelfRemindersForBot,
   createSelfReminder,
@@ -424,7 +424,7 @@ async function handleReminderFlow(
     return;
   }
 
-  // Step 2: Got time → create the self-reminder as recurring
+  // Step 2: Got time → create MedicationReminder directly (same table the doctor uses)
   if (state.step === 'AWAITING_TIME') {
     const timeText = text.trim();
     const timeMatch = timeText.match(/(\d{1,2})[:\.](\d{2})/);
@@ -444,28 +444,27 @@ async function handleReminderFlow(
       return;
     }
 
-    // createSelfReminder handles minute rounding internally — pass raw time
-    const todayStr = getTodayArgentinaStr();
-    const result = await createSelfReminder(patientId, {
-      description: state.description!,
-      date: todayStr,
-      time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
-      recurring: true,
-    });
+    // Round minute to nearest 30 (medication cron runs at :00 and :30)
+    const roundedMinute = minute < 15 ? 0 : 30;
 
     reminderFlowState.delete(phone);
 
-    // Show the rounded time that the cron will actually use
-    const roundedMinute = minute < 15 ? 0 : 30;
-    const timeDisplay = `${String(hour).padStart(2, '0')}:${String(roundedMinute).padStart(2, '0')}`;
+    try {
+      await createMedReminderFromBot(
+        patientId,
+        state.description!,
+        'Según indicación médica',
+        hour,
+        roundedMinute
+      );
 
-    if (result.success) {
+      const timeDisplay = `${String(hour).padStart(2, '0')}:${String(roundedMinute).padStart(2, '0')}`;
       const msg =
         `Listo! Te voy a recordar *"${state.description}"* todos los días a las ${timeDisplay} hs.\n\n` +
-        `Para ver tus recordatorios escribí "mis recordatorios". Para cancelar uno, escribí "cancelar recordatorio" y el número.`;
+        `El recordatorio aparece en tu ficha y tu médico también lo puede ver.`;
       await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
-    } else {
-      const msg = `No pude crear el recordatorio: ${result.message}`;
+    } catch (err) {
+      const msg = `No pude crear el recordatorio: ${err instanceof Error ? err.message : 'Error'}`;
       await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
     }
     return;

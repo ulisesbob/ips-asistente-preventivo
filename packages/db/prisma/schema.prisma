@@ -273,7 +273,7 @@ model PatientSelfReminder {
 model MedicationReminder {
   id             String   @id @default(uuid()) @db.Uuid
   patientId      String   @db.Uuid
-  doctorId       String   @db.Uuid
+  doctorId       String?  @db.Uuid
   medicationName String   @db.VarChar(200)
   dosage         String   @db.VarChar(200)
   reminderHour   Int      @db.SmallInt
@@ -282,7 +282,7 @@ model MedicationReminder {
   createdAt      DateTime @default(now()) @db.Timestamptz()
 
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctor  Doctor  @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  doctor  Doctor? @relation(fields: [doctorId], references: [id], onDelete: Restrict)
 
   @@index([patientId, active])
   @@index([active, reminderHour, reminderMinute])

@@ -134,6 +134,49 @@ export async function deleteMedReminder(id: string, doctorId: string, role: Role
   await prisma.medicationReminder.delete({ where: { id } });
 }
 
+// ─── CREATE FROM BOT (no doctor needed) ─────────────────────────────────────
+
+/**
+ * Creates a medication reminder from the bot flow (patient self-service).
+ * No doctorId required — shows as "Creado por el paciente" in the panel.
+ */
+export async function createMedReminderFromBot(
+  patientId: string,
+  medicationName: string,
+  dosage: string,
+  reminderHour: number,
+  reminderMinute: number
+): Promise<{ id: string; medicationName: string; reminderHour: number; reminderMinute: number }> {
+  if (reminderHour < 0 || reminderHour > 23) {
+    throw new ValidationError('La hora debe ser entre 0 y 23');
+  }
+
+  // Check max active meds (prevent abuse)
+  const activeCount = await prisma.medicationReminder.count({
+    where: { patientId, active: true },
+  });
+  if (activeCount >= 10) {
+    throw new ValidationError('Ya tenés 10 recordatorios de medicación activos. Cancelá alguno para agregar otro.');
+  }
+
+  return prisma.medicationReminder.create({
+    data: {
+      patientId,
+      doctorId: null,
+      medicationName: medicationName.trim().replace(/[<>]/g, ''),
+      dosage: dosage.trim().replace(/[<>]/g, ''),
+      reminderHour,
+      reminderMinute,
+    },
+    select: {
+      id: true,
+      medicationName: true,
+      reminderHour: true,
+      reminderMinute: true,
+    },
+  });
+}
+
 // ─── GET PATIENT MEDICATIONS FOR BOT CONTEXT ────────────────────────────────
 
 /**
