@@ -211,3 +211,7 @@ Archivo vivo. Se actualiza cada vez que se comete un error o se descubre un patr
 ### #52 — seed-prod.ts no incluía la base de conocimiento
 **Error:** El script de seed de producción solo creaba los 9 programas + 1 admin. Las 30 FAQs del IPS estaban en seed.ts (dev) pero no en seed-prod.ts. La tabla `knowledge_base` en producción estaba vacía salvo lo que el admin agregaba manualmente desde el panel.
 **Lección:** Cuando hay datos maestros que el sistema necesita para funcionar (FAQs, programas, config base), deben estar en TODOS los seeds (dev Y prod). Un seed de producción incompleto causa bugs silenciosos porque el sistema "funciona" pero le falta contexto.
+
+### #53 — .trim() antes de CSV injection regex anula la detección de \t y \r
+**Error:** En `createSelfReminder`, se hacía `input.description.trim()` ANTES de `CSV_INJECTION_REGEX.test(desc)`. El regex incluía `\t` y `\r` como chars peligrosos, pero `.trim()` ya los removía. Un input `"\tCMD('calc')"` pasaba la validación porque trim lo convertía en `"CMD('calc')"`.
+**Lección:** Cuando se valida contra caracteres que `.trim()` remueve (tab, CR, LF), ejecutar la validación de seguridad ANTES del trim, sobre el input crudo. Orden correcto: (1) validar seguridad en raw, (2) trim, (3) validar longitud/formato en trimmed.

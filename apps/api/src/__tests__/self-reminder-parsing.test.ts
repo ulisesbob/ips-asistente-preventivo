@@ -77,6 +77,13 @@ describe('parseSelfReminderTag', () => {
     expect(result.found).toBe(true);
     expect(result.data?.description).toBe('Turno > 10:00');
   });
+
+  it('handles description containing } character (regex fix)', () => {
+    const response = '<<SELF_REMINDER:{"descripcion":"Turno {sala 3}","fecha":"2026-04-15","hora":"10:00"}>>';
+    const result = parseSelfReminderTag(response);
+    expect(result.found).toBe(true);
+    expect(result.data?.description).toBe('Turno {sala 3}');
+  });
 });
 
 // ─── parseListRemindersTag ───────────────────────────────────────────────────
@@ -120,6 +127,12 @@ describe('parseCancelReminderTag', () => {
     const result = parseCancelReminderTag('No hay tag acá');
     expect(result.found).toBe(false);
     expect(result.index).toBeUndefined();
+  });
+
+  it('parses index 0 (boundary — validation is upstream)', () => {
+    const result = parseCancelReminderTag('<<CANCEL_REMINDER:0>>');
+    expect(result.found).toBe(true);
+    expect(result.index).toBe(0);
   });
 });
 

@@ -36,13 +36,14 @@ export async function createSelfReminder(
   patientId: string,
   input: CreateSelfReminderInput
 ): Promise<SelfReminderResult> {
-  // Validate description
+  // Validate description — check CSV injection on RAW input before trimming
+  // (LESSONS #30: \t and \r are injection chars, but .trim() removes them)
+  if (CSV_INJECTION_REGEX.test(input.description)) {
+    return { success: false, message: 'La descripción contiene caracteres no permitidos.' };
+  }
   const desc = input.description.trim();
   if (desc.length < 2 || desc.length > 200) {
     return { success: false, message: 'La descripción debe tener entre 2 y 200 caracteres.' };
-  }
-  if (CSV_INJECTION_REGEX.test(desc)) {
-    return { success: false, message: 'La descripción contiene caracteres no permitidos.' };
   }
 
   // Parse and validate date (LESSONS #44: use UTC getters)
@@ -317,7 +318,8 @@ function getTodayArgentina(): Date {
 export function parseSelfReminderTag(
   aiResponse: string
 ): { found: boolean; data?: CreateSelfReminderInput; cleanResponse: string } {
-  const tagRegex = /<<SELF_REMINDER:(\{[^}]+\})>>/;
+  // Match until closing }>>, allowing } inside JSON values (e.g. "Turno {sala 3}")
+  const tagRegex = /<<SELF_REMINDER:(\{.*?\})>>/;
   const match = aiResponse.match(tagRegex);
 
   if (!match) {
