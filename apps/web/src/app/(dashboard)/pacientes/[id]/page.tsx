@@ -893,13 +893,15 @@ export default function PatientDetailPage() {
                   return (
                     <tr key={sr.id} className={sr.status === 'CANCELLED' ? 'opacity-50' : ''}>
                       <td className="px-4 py-2 text-sm font-medium">
-                        {sr.description}
-                        {sr.recurring && (
-                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200">Diario</span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          <span>{sr.description}</span>
+                          {sr.recurring && (
+                            <span className="inline-flex text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200 whitespace-nowrap">Diario</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-2 text-sm text-muted-foreground tabular-nums">
-                        {formatDate(sr.reminderDate)}
+                        {sr.recurring ? 'Todos los días' : formatDate(sr.reminderDate)}
                       </td>
                       <td className="px-4 py-2 text-sm text-muted-foreground tabular-nums">
                         {String(sr.reminderHour).padStart(2, '0')}:{String(sr.reminderMinute).padStart(2, '0')}
