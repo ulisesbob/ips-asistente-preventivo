@@ -190,7 +190,7 @@ export function buildSystemPrompt(patient?: PatientContext): string {
       ? '\nRECORDATORIOS PERSONALES DEL PACIENTE (creados por el paciente via chat):\n' +
         patient.selfReminders
           .map((r, i) => {
-            const safeDesc = r.description.replace(/[\n\r\\]/g, '').slice(0, 200);
+            const safeDesc = r.description.replace(/[\n\r\\<>]/g, '').slice(0, 200);
             const recurLabel = r.recurring ? ' (DIARIO)' : '';
             return `${i + 1}. "${safeDesc}" — ${formatDateAR(r.reminderDate)} a las ${String(r.reminderHour).padStart(2, '0')}:${String(r.reminderMinute).padStart(2, '0')}${recurLabel}`;
           })

@@ -42,7 +42,8 @@ export async function createSelfReminder(
   if (CSV_INJECTION_REGEX.test(input.description)) {
     return { success: false, message: 'La descripción contiene caracteres no permitidos.' };
   }
-  const desc = input.description.trim();
+  // Strip << >> to prevent prompt injection when description is injected into system prompt
+  const desc = input.description.trim().replace(/[<>]/g, '');
   if (desc.length < 2 || desc.length > 200) {
     return { success: false, message: 'La descripción debe tener entre 2 y 200 caracteres.' };
   }
@@ -269,12 +270,12 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
     try {
       await sendTextMessage(sendPhone, message);
       if (r.recurring) {
-        // Recurring: advance date to tomorrow, keep PENDING
-        const nextDate = new Date(r.reminderDate);
-        nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+        // Recurring: skip to TOMORROW (not +1 from overdue date) to avoid catch-up spam
+        const tomorrow = new Date(todayUtc);
+        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
         await prisma.patientSelfReminder.update({
           where: { id: r.id },
-          data: { reminderDate: nextDate },
+          data: { reminderDate: tomorrow },
         });
       } else {
         // One-time: mark as SENT

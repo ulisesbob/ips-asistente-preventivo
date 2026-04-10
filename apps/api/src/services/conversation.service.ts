@@ -36,12 +36,19 @@ const ESCALATION_KEYWORDS = [
   'necesito ayuda', 'no me sirve', 'reclamar', 'reclamo', 'queja',
 ];
 
-// Reminder keywords — patient wants to set a daily reminder (pre-normalized, no accents)
+// Reminder keywords — patient wants to CREATE a reminder (pre-normalized, no accents)
+// Use phrases that imply intent to create, not just mention the word "recordatorio"
 const REMINDER_KEYWORDS = [
-  'recordame', 'recordatorio', 'avisame', 'recuerdame',
-  'quiero un recordatorio', 'poneme un recordatorio',
-  'todos los dias', 'cada dia',
+  'recordame',                    // "recordame tomar la pastilla"
+  'recuerdame',                   // "recuérdame..."
+  'avisame',                      // "avisame a las 8"
+  'quiero un recordatorio',       // explicit intent
+  'poneme un recordatorio',       // explicit intent
+  'crear recordatorio',           // explicit intent
+  'haceme un recordatorio',       // explicit intent
+  'necesito un recordatorio',     // explicit intent
 ];
+// Note: "recordatorio" alone is NOT here — "ya tengo un recordatorio" must NOT trigger the flow
 
 // Shared phone normalization for Argentina (LESSONS #40)
 function toSendablePhone(phone: string): string {
@@ -437,20 +444,19 @@ async function handleReminderFlow(
       return;
     }
 
-    // Round minute to nearest 30 (cron runs every 30 min)
-    const roundedMinute = minute < 15 ? 0 : 30;
-
-    // Create the recurring self-reminder starting today
+    // createSelfReminder handles minute rounding internally — pass raw time
     const todayStr = getTodayArgentinaStr();
     const result = await createSelfReminder(patientId, {
       description: state.description!,
       date: todayStr,
-      time: `${String(hour).padStart(2, '0')}:${String(roundedMinute).padStart(2, '0')}`,
+      time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
       recurring: true,
     });
 
     reminderFlowState.delete(phone);
 
+    // Show the rounded time that the cron will actually use
+    const roundedMinute = minute < 15 ? 0 : 30;
     const timeDisplay = `${String(hour).padStart(2, '0')}:${String(roundedMinute).padStart(2, '0')}`;
 
     if (result.success) {
