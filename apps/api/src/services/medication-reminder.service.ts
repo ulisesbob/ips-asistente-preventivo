@@ -1,6 +1,6 @@
 import { prisma, Role } from '@ips/db';
 import { NotFoundError, ValidationError } from '../utils/errors';
-import { sendTextMessage } from './whatsapp.service';
+import { sendTextMessage } from './messaging.service';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

@@ -12,11 +12,19 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
+  // Optional — Messaging provider switch (default: meta)
+  MESSAGING_PROVIDER: z.enum(['meta', 'twilio']).default('meta'),
+
   // Optional — WhatsApp (Meta Cloud API)
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_VERIFY_TOKEN: z.string().optional(),
   WHATSAPP_APP_SECRET: z.string().optional(),
+
+  // Optional — WhatsApp via Twilio (alternative to Meta)
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_WHATSAPP_FROM: z.string().optional(),
 
   // Optional — AI (Anthropic)
   ANTHROPIC_API_KEY: z.string().optional(),

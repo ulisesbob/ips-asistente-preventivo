@@ -6,6 +6,7 @@ import { programRouter, patientProgramRouter } from './program.routes';
 import { doctorRouter } from './doctor.routes';
 import { conversationRouter } from './conversation.routes';
 import { whatsappRouter } from './whatsapp.routes';
+import { twilioRouter } from './twilio.routes';
 import { dashboardRouter } from './dashboard.routes';
 import { knowledgeRouter } from './knowledge.routes';
 import { medicationReminderRouter } from './medication-reminder.routes';
@@ -25,5 +26,7 @@ router.use('/api', medicationReminderRouter);
 router.use('/api', patientProgramRouter);
 // WhatsApp webhook (no auth — Meta calls this directly)
 router.use('/api', whatsappRouter);
+// Twilio webhook (no auth — Twilio calls this directly, signature-verified)
+router.use('/api', twilioRouter);
 
 export { router };

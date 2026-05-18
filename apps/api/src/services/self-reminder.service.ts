@@ -1,5 +1,5 @@
 import { prisma, SelfReminderStatus } from '@ips/db';
-import { sendTextMessage } from './whatsapp.service';
+import { sendTextMessage } from './messaging.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

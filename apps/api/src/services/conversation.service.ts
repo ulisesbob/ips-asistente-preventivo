@@ -5,7 +5,7 @@ import {
   RegisteredVia,
   PatientProgramStatus,
 } from '@ips/db';
-import { sendTextMessage } from './whatsapp.service';
+import { sendTextMessage } from './messaging.service';
 import { generateResponse, buildSystemPrompt, ChatMessage } from './ai.service';
 import { getLatestNotesForBot } from './note.service';
 import { getRelevantKBForBot } from './knowledge.service';

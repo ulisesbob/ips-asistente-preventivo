@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { prisma, PatientProgramStatus, ReminderStatus } from '@ips/db';
 import { config } from '../config/env';
-import { sendTextMessage } from './whatsapp.service';
+import { sendTextMessage } from './messaging.service';
 import { logger } from '../utils/logger';
 
 // ─── Constants ───────────────────────────────────────────────────────────────

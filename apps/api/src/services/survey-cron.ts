@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import { prisma } from '@ips/db';
-import { sendTextMessage } from './whatsapp.service';
+import { sendTextMessage } from './messaging.service';
 import { logger } from '../utils/logger';
 
 let task: cron.ScheduledTask | null = null;
