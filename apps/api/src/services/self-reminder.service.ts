@@ -1,5 +1,6 @@
 import { prisma, SelfReminderStatus } from '@ips/db';
 import { sendTextMessage } from './messaging.service';
+import { maskPhone, firstName } from '../utils/pii';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -261,9 +262,11 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
       sendPhone = '54' + sendPhone.slice(3);
     }
 
-    const firstName = r.patient.fullName.split(' ')[0];
+    // Usar helper centralizado en utils/pii.ts (maneja trim, multiples espacios,
+    // tabs, etc. — antes el inline split(' ')[0] daba "(no name)" con leading whitespace).
+    const greetName = firstName(r.patient.fullName);
     const message =
-      `Hola ${firstName}! Te recuerdo:\n\n` +
+      `Hola ${greetName}! Te recuerdo:\n\n` +
       `📌 *${r.description}*\n\n` +
       `Este recordatorio lo creaste vos desde el chat. ¡Éxitos!`;
 
@@ -286,7 +289,7 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
       }
       sent++;
     } catch (err) {
-      console.error(`[SelfReminder] Error sending to ***${sendPhone.slice(-4)}:`, err);
+      console.error(`[SelfReminder] Error sending to ${maskPhone(sendPhone)}:`, err);
       // Cancel permanently overdue reminders (>48h past) to avoid infinite retries
       const ageMs = Date.now() - new Date(r.reminderDate).getTime();
       if (ageMs > 48 * 60 * 60 * 1000) {
@@ -337,11 +340,13 @@ function getTodayArgentina(): Date {
 export function parseSelfReminderTag(
   aiResponse: string
 ): { found: boolean; data?: CreateSelfReminderInput; cleanResponse: string } {
-  // Match until closing }>>, allowing } inside JSON values (e.g. "Turno {sala 3}")
-  const tagRegex = /<<SELF_REMINDER:(\{.*?\})>>/;
+  // Match until closing }>>, allowing } inside JSON values (e.g. "Turno {sala 3}").
+  // [\s\S] en vez de . para que descripciones con \n no rompan el match
+  // (Claude a veces incluye newlines en values JSON — error-detective finding).
+  const tagRegex = /<<SELF_REMINDER:(\{[\s\S]*?\})>>/;
   // Strip-all variant (audit #22): if AI accidentally emits multiple tags,
   // we still want NONE visible to the patient. We only act on the first one.
-  const tagRegexGlobal = /<<SELF_REMINDER:\{.*?\}>>/g;
+  const tagRegexGlobal = /<<SELF_REMINDER:\{[\s\S]*?\}>>/g;
   const match = aiResponse.match(tagRegex);
 
   if (!match) {

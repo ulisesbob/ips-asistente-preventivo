@@ -21,6 +21,7 @@ import {
   parseCancelReminderTag,
   formatRemindersForWhatsApp,
 } from './self-reminder.service';
+import { maskId, maskPhone, firstName } from '../utils/pii';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -66,24 +67,7 @@ function toSendablePhone(phone: string): string {
   return p;
 }
 
-// ─── PII masking for logs (audit #24) ────────────────────────────────────────
-// Production logs (Render console) are accessible to whoever has the dashboard.
-// Mask patient identifiers so we can still correlate without leaking PII.
-
-function maskId(id: string): string {
-  if (!id) return '';
-  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
-}
-
-function maskPhone(phone: string | null | undefined): string {
-  if (!phone) return '(no phone)';
-  const last4 = phone.slice(-4);
-  return `***${last4}`;
-}
-
-function firstName(fullName: string): string {
-  return (fullName ?? '').split(' ')[0] || '(no name)';
-}
+// PII masking centralized in utils/pii.ts (see audit #24).
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -291,11 +275,13 @@ async function autoLinkPatient(
   // Atomic check-and-update so two concurrent webhooks don't both send the
   // welcome greeting. Whoever wins the race flips whatsappLinked false→true
   // and runs the greeting; the loser gets P2025 and silently returns.
+  // Select consent in the same query so we use the FRESH value (no TOCTOU
+  // between snapshot read and post-update greeting — security-auditor finding).
   const updated = await prisma.patient
     .update({
       where: { id: patient.id, whatsappLinked: false },
       data: { whatsappLinked: true },
-      select: { id: true },
+      select: { id: true, consent: true },
     })
     .catch((err: { code?: string }) => {
       if (err.code === 'P2025') return null; // already linked by concurrent request
@@ -304,7 +290,7 @@ async function autoLinkPatient(
 
   if (!updated) return; // concurrent request already greeted this patient
 
-  if (!patient.consent) return; // opted out — link silently
+  if (!updated.consent) return; // opted out — link silently (use fresh consent)
 
   const greeting =
     patient.programs.length > 0

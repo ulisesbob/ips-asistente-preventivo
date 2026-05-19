@@ -3,6 +3,7 @@ import { prisma, PatientProgramStatus, ReminderStatus } from '@ips/db';
 import { config } from '../config/env';
 import { sendTextMessage } from './messaging.service';
 import { logger } from '../utils/logger';
+import { advanceNextReminderDate } from '../utils/schedule';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -155,15 +156,11 @@ async function _processDueReminders(): Promise<{ sent: number; failed: number }>
     const success = await sendTextMessage(phone, message);
 
     if (success) {
-      // Advance schedule from the ORIGINAL nextReminderDate, not today.
-      // Otherwise every server downtime would shift the cadence forward (audit #15).
-      // If we missed many cycles, keep advancing freq days until we reach a future date.
-      const nextReminderDate = new Date(enrollment.nextReminderDate);
-      do {
-        nextReminderDate.setUTCDate(
-          nextReminderDate.getUTCDate() + program.reminderFrequencyDays
-        );
-      } while (nextReminderDate <= today);
+      const nextReminderDate = advanceNextReminderDate(
+        enrollment.nextReminderDate,
+        program.reminderFrequencyDays,
+        today
+      );
 
       await prisma.$transaction([
         prisma.reminder.create({

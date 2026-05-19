@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { verifyTwilioSignature } from '../services/twilio.service';
 import { handleIncomingMessage } from '../services/conversation.service';
+import { maskPhone } from '../utils/pii';
 
 const twilioRouter = Router();
 
@@ -74,7 +75,7 @@ twilioRouter.post('/webhooks/twilio', webhookLimiter, (req, res) => {
       await handleIncomingMessage(phone, body, profileName);
     } catch (error) {
       // Mask phone — production logs in Render are accessible to whoever has the dashboard.
-      console.error(`[Twilio] Error procesando mensaje de ***${phone.slice(-4)}:`, error);
+      console.error(`[Twilio] Error procesando mensaje de ${maskPhone(phone)}:`, error);
     }
   })().catch((error) => {
     console.error('[Twilio] Error inesperado procesando mensaje:', error);

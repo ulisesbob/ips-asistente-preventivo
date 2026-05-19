@@ -1,6 +1,7 @@
 import { prisma, Role } from '@ips/db';
 import { NotFoundError, ValidationError } from '../utils/errors';
 import { sendTextMessage } from './messaging.service';
+import { maskPhone, firstName } from '../utils/pii';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -257,7 +258,7 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
     }
 
     const message =
-      `Hola ${r.patient.fullName.split(' ')[0]}! Te recuerdo que es hora de tomar tu medicación:\n\n` +
+      `Hola ${firstName(r.patient.fullName)}! Te recuerdo que es hora de tomar tu medicación:\n\n` +
       `💊 *${r.medicationName}* — ${r.dosage}\n\n` +
       `¡Cuidá tu salud!`;
 
@@ -265,7 +266,7 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
       await sendTextMessage(sendPhone, message);
       sent++;
     } catch (err) {
-      console.error(`[MedReminder] Error sending to ***${sendPhone.slice(-4)}:`, err);
+      console.error(`[MedReminder] Error sending to ${maskPhone(sendPhone)}:`, err);
       failed++;
     }
 

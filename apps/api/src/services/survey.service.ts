@@ -1,5 +1,58 @@
 import { prisma, Role } from '@ips/db';
 
+// ─── Pure parser (exported for testing) ──────────────────────────────────────
+
+/**
+ * Normalize patient input (strip accents + punctuation + case).
+ */
+export function normalizeSurveyInput(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^\w\s]/g, '')
+    .trim();
+}
+
+// Lista corta de afirmaciones inequívocas. "ok"/"claro"/"listo" se removieron
+// porque pueden ser ACK casual sin asistencia real (code-review feedback).
+export const SURVEY_YES_WORDS = ['si', 'sip', 'sii', 'siii', 'dale', 'obvio', 'yes', '1'];
+export const SURVEY_NO_WORDS = ['no', 'nop', 'nope', 'tampoco', '2'];
+
+export type ParsedSurveyAnswer =
+  | { kind: 'yes' }
+  | { kind: 'no' }
+  | { kind: 'rating'; value: number }
+  | { kind: 'unknown' };
+
+/**
+ * Parse the patient's text given the current survey step.
+ * - `awaitingAttended`: expecting yes/no
+ * - `awaitingRating`: expecting 1-5
+ *
+ * Pure function — no DB, easy to unit test.
+ */
+export function parseSurveyAnswer(
+  text: string,
+  step: 'awaitingAttended' | 'awaitingRating'
+): ParsedSurveyAnswer {
+  const norm = normalizeSurveyInput(text);
+
+  if (step === 'awaitingAttended') {
+    if (SURVEY_YES_WORDS.includes(norm)) return { kind: 'yes' };
+    if (SURVEY_NO_WORDS.includes(norm)) return { kind: 'no' };
+    return { kind: 'unknown' };
+  }
+
+  // awaitingRating — require exact single digit so "3 de mayo" / "necesito 5"
+  // don't get parsed as ratings.
+  if (/^[1-5]$/.test(norm)) {
+    return { kind: 'rating', value: parseInt(norm, 10) };
+  }
+  return { kind: 'unknown' };
+}
+
 // ─── Schedule survey after control ──────────────────────────────────────────
 
 /**
@@ -50,33 +103,17 @@ export async function processSurveyResponse(
 
   if (!pending) return null; // no pending survey
 
-  // Normalize: lowercase + strip accents + strip punctuation/whitespace.
-  // Audit #20: previously only "si"/"sí"/"1"/"no"/"2" matched — patients
-  // saying "sip", "dale", "obvio", "nop" got dropped to AI flow and the survey
-  // never completed, inflating "no respondió" metrics.
-  const textNorm = text
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^\w\s]/g, '')
-    .trim();
-
-  // Lista corta de afirmaciones inequívocas. "ok"/"claro"/"listo" se removieron
-  // porque pueden ser ACK casual sin asistencia real (code-review feedback).
-  const YES_WORDS = ['si', 'sip', 'sii', 'siii', 'dale', 'obvio', 'yes', '1'];
-  const NO_WORDS = ['no', 'nop', 'nope', 'tampoco', '2'];
-
   // Step 1: attended? (Sí/No)
   if (pending.attended === null) {
-    if (YES_WORDS.includes(textNorm)) {
+    const parsed = parseSurveyAnswer(text, 'awaitingAttended');
+    if (parsed.kind === 'yes') {
       await prisma.survey.update({
         where: { id: pending.id },
         data: { attended: true },
       });
       return '¡Bien! ¿Cómo calificarías la atención? Respondé con un número del 1 al 5 (1=Mala, 5=Excelente).';
     }
-    if (NO_WORDS.includes(textNorm)) {
+    if (parsed.kind === 'no') {
       await prisma.survey.update({
         where: { id: pending.id },
         data: { attended: false, completedAt: new Date() },
@@ -86,17 +123,15 @@ export async function processSurveyResponse(
     return null; // not a survey response
   }
 
-  // Step 2: rating (1-5). Require EXACT single digit so messages like
-  // "3 de mayo" or "necesito turno para el 5" don't get parsed as ratings
-  // (audit #20).
+  // Step 2: rating (1-5)
   if (pending.attended === true) {
-    if (/^[1-5]$/.test(textNorm)) {
-      const rating = parseInt(textNorm, 10);
+    const parsed = parseSurveyAnswer(text, 'awaitingRating');
+    if (parsed.kind === 'rating') {
       await prisma.survey.update({
         where: { id: pending.id },
-        data: { rating, completedAt: new Date() },
+        data: { rating: parsed.value, completedAt: new Date() },
       });
-      return rating >= 4
+      return parsed.value >= 4
         ? '¡Gracias por tu respuesta! Nos alegra que hayas tenido una buena experiencia.'
         : 'Gracias por tu respuesta. Vamos a trabajar para mejorar la atención.';
     }

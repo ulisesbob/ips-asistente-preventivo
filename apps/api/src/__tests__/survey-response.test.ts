@@ -147,3 +147,74 @@ describe('Survey response parsing', () => {
     });
   });
 });
+
+// ─── Audit fix #20: parseSurveyAnswer (real implementation) ──────────────────
+// Tests que importan la fn real de survey.service.ts, no la reimplementación
+// local de arriba (test-architect feedback: los tests "reimplementados" dan
+// false confidence cuando el código real cambia).
+
+import { parseSurveyAnswer } from '../services/survey.service';
+
+describe('parseSurveyAnswer (real impl) — Step 1: awaitingAttended', () => {
+  describe('variantes YES inequívocas', () => {
+    it.each(['si', 'sí', 'SI', 'Sí', 'sip', 'sii', 'dale', 'obvio', 'yes', '1', '  si  ', 'sí.'])(
+      '"%s" → yes',
+      (text) => {
+        expect(parseSurveyAnswer(text, 'awaitingAttended')).toEqual({ kind: 'yes' });
+      }
+    );
+  });
+
+  describe('variantes NO inequívocas', () => {
+    it.each(['no', 'NO', 'No', 'nop', 'nope', 'tampoco', '2', '  no  ', 'no.'])(
+      '"%s" → no',
+      (text) => {
+        expect(parseSurveyAnswer(text, 'awaitingAttended')).toEqual({ kind: 'no' });
+      }
+    );
+  });
+
+  describe('NO debe matchear (ACK casual / texto largo / pregunta)', () => {
+    it.each([
+      ['ok', 'ACK casual ambiguo (no = asistencia)'],
+      ['claro', 'puede ser parte de "claro que no"'],
+      ['listo', 'ACK ambiguo'],
+      ['ok mañana voy', 'ACK con contexto'],
+      ['quiero cancelar', 'mensaje no relacionado'],
+      ['si pero no', 'ambiguo'],
+      ['3', 'número fuera de rango YES/NO'],
+      ['', 'string vacío'],
+    ])('"%s" — %s', (text) => {
+      expect(parseSurveyAnswer(text, 'awaitingAttended')).toEqual({ kind: 'unknown' });
+    });
+  });
+});
+
+describe('parseSurveyAnswer (real impl) — Step 2: awaitingRating', () => {
+  it.each([
+    ['1', 1],
+    ['2', 2],
+    ['3', 3],
+    ['4', 4],
+    ['5', 5],
+    [' 3 ', 3],
+    ['5.', 5],
+  ])('"%s" → rating %s', (text, expected) => {
+    expect(parseSurveyAnswer(text, 'awaitingRating')).toEqual({ kind: 'rating', value: expected });
+  });
+
+  describe('NO debe matchear (false positives del parser antiguo con parseInt)', () => {
+    it.each([
+      ['0', 'fuera de rango'],
+      ['6', 'fuera de rango'],
+      ['3a', 'número con letra'],
+      ['3 de mayo', 'fecha — parseInt antiguo daba 3'],
+      ['5.0', 'decimal — parseInt antiguo daba 5'],
+      ['necesito turno para el 5', 'texto largo'],
+      ['', 'vacío'],
+      ['cinco', 'número escrito'],
+    ])('"%s" — %s', (text) => {
+      expect(parseSurveyAnswer(text, 'awaitingRating')).toEqual({ kind: 'unknown' });
+    });
+  });
+});

@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { prisma } from '@ips/db';
 import { sendTextMessage } from './messaging.service';
 import { logger } from '../utils/logger';
+import { maskPhone, firstName } from '../utils/pii';
 
 let task: cron.ScheduledTask | null = null;
 let running = false;
@@ -64,11 +65,11 @@ export function startSurveyCron(): void {
           sendPhone = '54' + sendPhone.slice(3);
         }
 
-        const firstName = survey.patient.fullName.split(' ')[0];
+        const greetName = firstName(survey.patient.fullName);
         const programName = survey.patientProgram.program.name;
 
         const message =
-          `Hola ${firstName}! Queremos saber cómo te fue con tu control de *${programName}*.\n\n` +
+          `Hola ${greetName}! Queremos saber cómo te fue con tu control de *${programName}*.\n\n` +
           `¿Pudiste realizar tu control?\n` +
           `Respondé *Sí* o *No*`;
 
@@ -80,7 +81,7 @@ export function startSurveyCron(): void {
           });
           sent++;
         } catch (err) {
-          console.error(`[SurveyCron] Error sending to ***${sendPhone.slice(-4)}:`, err);
+          console.error(`[SurveyCron] Error sending to ${maskPhone(sendPhone)}:`, err);
           failed++;
         }
 

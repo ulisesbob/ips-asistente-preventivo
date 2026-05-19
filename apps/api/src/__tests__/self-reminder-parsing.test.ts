@@ -195,3 +195,62 @@ describe('formatRemindersForWhatsApp', () => {
     expect(result).toContain('08:00');
   });
 });
+
+// ─── Audit fix #22: strip-all tag behavior ───────────────────────────────────
+// Si el AI accidentalmente emite múltiples tags en una sola respuesta, el
+// regex sin /g dejaba el segundo visible al paciente. Verificamos que ahora
+// se strippean TODOS.
+
+describe('Multi-tag strip-all (audit #22)', () => {
+  it('parseSelfReminderTag: 2 tags → primero parseado, AMBOS strippeados', () => {
+    const response =
+      'Listo!\n<<SELF_REMINDER:{"descripcion":"A","fecha":"2026-06-01","hora":"08:00"}>>\n' +
+      '<<SELF_REMINDER:{"descripcion":"B","fecha":"2026-06-02","hora":"09:00"}>>';
+
+    const result = parseSelfReminderTag(response);
+    expect(result.found).toBe(true);
+    expect(result.data?.description).toBe('A'); // procesa el primero
+    expect(result.cleanResponse).toBe('Listo!'); // ambos strippeados
+    expect(result.cleanResponse).not.toContain('SELF_REMINDER');
+  });
+
+  it('parseSelfReminderTag: tag malformado → no crash, response limpia', () => {
+    const response = 'Algo\n<<SELF_REMINDER:{json roto}>>\n<<SELF_REMINDER:{tampoco json}>>';
+    const result = parseSelfReminderTag(response);
+    expect(result.found).toBe(false);
+    expect(result.cleanResponse).not.toContain('SELF_REMINDER');
+  });
+
+  it('parseListRemindersTag: 2 tags → ambos strippeados (no .test() stateful bug)', () => {
+    const response = 'Acá van:\n<<LIST_REMINDERS>>\nY de paso <<LIST_REMINDERS>>';
+    const result = parseListRemindersTag(response);
+    expect(result.found).toBe(true);
+    expect(result.cleanResponse).not.toContain('LIST_REMINDERS');
+  });
+
+  it('parseListRemindersTag: dos llamadas seguidas con mismo string son consistentes', () => {
+    // Stateful regex /g.test() puede dar false en la 2da llamada por lastIndex.
+    // Verificamos que la implementación es estable.
+    const response = 'Acá <<LIST_REMINDERS>>';
+    const r1 = parseListRemindersTag(response);
+    const r2 = parseListRemindersTag(response);
+    expect(r1.found).toBe(true);
+    expect(r2.found).toBe(true);
+    expect(r1.cleanResponse).toBe(r2.cleanResponse);
+  });
+
+  it('parseCancelReminderTag: 2 tags → primer index parseado, ambos strippeados', () => {
+    const response = 'OK <<CANCEL_REMINDER:2>>\nY también <<CANCEL_REMINDER:5>>';
+    const result = parseCancelReminderTag(response);
+    expect(result.found).toBe(true);
+    expect(result.index).toBe(2);
+    expect(result.cleanResponse).not.toContain('CANCEL_REMINDER');
+  });
+
+  it('mensaje sin tags → cleanResponse intacto', () => {
+    const msg = 'Hola, no hay tags acá';
+    expect(parseSelfReminderTag(msg).cleanResponse).toBe(msg);
+    expect(parseListRemindersTag(msg).cleanResponse).toBe(msg);
+    expect(parseCancelReminderTag(msg).cleanResponse).toBe(msg);
+  });
+});
