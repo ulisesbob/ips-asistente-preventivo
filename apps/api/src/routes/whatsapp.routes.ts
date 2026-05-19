@@ -101,23 +101,29 @@ whatsappRouter.post(
       return;
     }
 
+    // Parse and dedup SYNCHRONOUSLY before responding (perf review CRITICAL):
+    // Meta retries fast on 5xx. If dedup runs inside the async IIFE, two webhooks
+    // racing in <50ms both pass the check and the message gets processed twice
+    // (10 queries + Claude call + send duplicated).
+    const allMessages = parseWebhookPayload(req.body).slice(0, MAX_MESSAGES_PER_WEBHOOK);
+    const freshMessages = [];
+    for (const msg of allMessages) {
+      if (processedMessageIds.has(msg.messageId)) {
+        console.log(`[WhatsApp] Duplicate message ${msg.messageId} — skipping`);
+        continue;
+      }
+      processedMessageIds.add(msg.messageId);
+      freshMessages.push(msg);
+    }
+
     // Respond 200 immediately — Meta requirement (must be < 5 seconds)
     res.status(200).json({ status: 'ok' });
 
     // Process messages asynchronously — fire and forget (errors logged, not thrown)
-    const messages = parseWebhookPayload(req.body).slice(0, MAX_MESSAGES_PER_WEBHOOK);
-
-    if (messages.length > 0) {
+    if (freshMessages.length > 0) {
       (async () => {
-        for (const msg of messages) {
+        for (const msg of freshMessages) {
           try {
-            // Deduplicate: Meta resends webhooks when server was down or slow
-            if (processedMessageIds.has(msg.messageId)) {
-              console.log(`[WhatsApp] Duplicate message ${msg.messageId} — skipping`);
-              continue;
-            }
-            processedMessageIds.add(msg.messageId);
-
             await handleIncomingMessage(msg.from, msg.text, msg.displayName);
           } catch (error) {
             console.error(`[WhatsApp] Error procesando mensaje de ${msg.from}:`, error);

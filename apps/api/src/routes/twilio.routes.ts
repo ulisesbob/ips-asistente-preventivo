@@ -49,13 +49,24 @@ twilioRouter.post('/webhooks/twilio', webhookLimiter, (req, res) => {
     return;
   }
 
-  // TwiML empty response — we reply asynchronously via the REST API.
-  res.status(200).type('text/xml').send('<Response/>');
-
   const messageSid = params.MessageSid ?? '';
   const from = params.From ?? '';
   const body = (params.Body ?? '').slice(0, MAX_MESSAGE_LENGTH);
   const profileName = (params.ProfileName ?? '').slice(0, 100).replace(/[<>"']/g, '');
+
+  // Dedup BEFORE responding (perf review CRITICAL): Twilio retries fast on 5xx.
+  // If the check ran inside the async IIFE, two webhooks racing in <50ms both
+  // passed and the message got processed twice.
+  const isDuplicate = !!messageSid && processedSids.has(messageSid);
+  if (messageSid && !isDuplicate) processedSids.add(messageSid);
+
+  // TwiML empty response — we reply asynchronously via the REST API.
+  res.status(200).type('text/xml').send('<Response/>');
+
+  if (isDuplicate) {
+    console.log(`[Twilio] Duplicate message ${messageSid} — skipping`);
+    return;
+  }
 
   if (!messageSid || !from || !body) {
     return;
@@ -66,12 +77,6 @@ twilioRouter.post('/webhooks/twilio', webhookLimiter, (req, res) => {
 
   (async () => {
     try {
-      if (processedSids.has(messageSid)) {
-        console.log(`[Twilio] Duplicate message ${messageSid} — skipping`);
-        return;
-      }
-      processedSids.add(messageSid);
-
       await handleIncomingMessage(phone, body, profileName);
     } catch (error) {
       // Mask phone — production logs in Render are accessible to whoever has the dashboard.
