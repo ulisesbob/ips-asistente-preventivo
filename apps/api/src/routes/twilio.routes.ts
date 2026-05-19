@@ -34,10 +34,10 @@ const MAX_MESSAGE_LENGTH = 2000;
  * Spec: https://www.twilio.com/docs/messaging/guides/webhook-request
  */
 twilioRouter.post('/webhooks/twilio', webhookLimiter, (req, res) => {
-  // Reconstruct the URL Twilio actually called (Render is behind a proxy).
-  const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
-  const host = (req.headers['x-forwarded-host'] as string) ?? req.headers.host;
-  const fullUrl = `${proto}://${host}${req.originalUrl}`;
+  // Reconstruct the URL Twilio called. With `app.set('trust proxy', 1)` in app.ts,
+  // req.protocol and req.get('host') honor X-Forwarded-* from Render's proxy only
+  // (not arbitrary client-supplied headers).
+  const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
 
   const signature = (req.headers['x-twilio-signature'] as string) ?? '';
   const params = (req.body ?? {}) as Record<string, string>;

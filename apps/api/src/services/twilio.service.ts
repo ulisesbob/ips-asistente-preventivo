@@ -92,9 +92,20 @@ export function verifyTwilioSignature(
 
   const expected = crypto.createHmac('sha1', authToken).update(data).digest('base64');
 
-  if (signature.length !== expected.length) return false;
+  // Decode both signatures from base64 BEFORE comparing — string-level Buffer.from()
+  // uses utf-8 by default which compares characters instead of the actual HMAC bytes.
+  let sigBuf: Buffer;
+  let expBuf: Buffer;
   try {
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+    sigBuf = Buffer.from(signature, 'base64');
+    expBuf = Buffer.from(expected, 'base64');
+  } catch {
+    return false;
+  }
+
+  if (sigBuf.length !== expBuf.length) return false;
+  try {
+    return crypto.timingSafeEqual(sigBuf, expBuf);
   } catch {
     return false;
   }

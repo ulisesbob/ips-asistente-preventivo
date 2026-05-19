@@ -16,6 +16,11 @@ const app = express();
 // Track server start time for uptime reporting in health checks
 const SERVER_START_TIME = new Date().toISOString();
 
+// Render (and most PaaS) sit behind a proxy. Without this, req.protocol is always
+// "http" and req.ip is the proxy IP, which breaks webhook URL reconstruction
+// (Twilio signature verification) and per-IP rate limiting.
+app.set('trust proxy', 1);
+
 // ─── Security & Parsing Middleware ────────────────────────────────────────────
 
 app.use(helmet());
