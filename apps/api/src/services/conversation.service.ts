@@ -24,6 +24,7 @@ import {
 } from './self-reminder.service';
 import { maskId, maskPhone, firstName } from '../utils/pii';
 import { config } from '../config/env';
+import { NotFoundError, ValidationError } from '../utils/errors';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -169,7 +170,19 @@ export async function handleIncomingMessage(
     patient.whatsappLinked = true; // local mutation so the next branch runs
   }
 
-  // 4. Check if conversation is ESCALATED — don't respond with AI, just save message
+  // 4. Pending survey response — chequear PRIMERO (antes de ESCALATED) para
+  // que las encuestas no queden colgadas si el paciente está en escalación
+  // activa. Si responde "sí" o "5" a una encuesta pendiente, lo procesamos
+  // aunque haya un operador atendiendo otro tema.
+  if (patient && patient.whatsappLinked) {
+    const surveyReply = await processSurveyResponse(patient.id, text);
+    if (surveyReply) {
+      await saveMessageAndReply(normalizedPhone, e164Phone, patient.id, text, surveyReply);
+      return;
+    }
+  }
+
+  // 5. Check if conversation is ESCALATED — don't respond with AI, just save message
   if (patient && patient.whatsappLinked) {
     const activeConv = await prisma.conversation.findFirst({
       where: { phone: e164Phone, status: ConversationStatus.ESCALATED },
@@ -205,7 +218,7 @@ export async function handleIncomingMessage(
         console.log(
           `[Escalation] Auto-reopened stale ESCALATED conv ${activeConv.id} (patient ${maskId(patient.id)})`
         );
-        // Fall through to normal handlers (survey / reminder flow / AI chat).
+        // Fall through to normal handlers (reminder flow / AI chat).
       } else {
         // Operator is actively handling — save patient message, don't respond.
         await prisma.message.create({
@@ -213,13 +226,6 @@ export async function handleIncomingMessage(
         });
         return;
       }
-    }
-
-    // 5. Check for pending survey response
-    const surveyReply = await processSurveyResponse(patient.id, text);
-    if (surveyReply) {
-      await saveMessageAndReply(normalizedPhone, e164Phone, patient.id, text, surveyReply);
-      return;
     }
 
     // 6. Check for active reminder flow (step-by-step, no AI needed)
@@ -817,7 +823,7 @@ async function verifyConversationAccess(
   });
 
   if (!conversation) {
-    throw new Error('Conversación no encontrada');
+    throw new NotFoundError('Conversación no encontrada');
   }
 
   // ADMIN ve todo, no requiere chequeo de programas
@@ -833,7 +839,7 @@ async function verifyConversationAccess(
   // DOCTOR debe tener acceso via doctor_programs ↔ patient_programs
   if (!conversation.patient) {
     // Conversación sin paciente vinculado — solo ADMIN.
-    throw new Error('Conversación no encontrada');
+    throw new NotFoundError('Conversación no encontrada');
   }
 
   const doctorPrograms = await prisma.doctorProgram.findMany({
@@ -847,7 +853,7 @@ async function verifyConversationAccess(
 
   if (!hasAccess) {
     // Mismo mensaje que "no encontrada" para no filtrar la existencia.
-    throw new Error('Conversación no encontrada');
+    throw new NotFoundError('Conversación no encontrada');
   }
 
   return {
@@ -869,7 +875,7 @@ export async function sendOperatorReply(
   const conversation = await verifyConversationAccess(conversationId, doctorId, role);
 
   if (conversation.status !== ConversationStatus.ESCALATED) {
-    throw new Error('Solo se puede responder a conversaciones escaladas');
+    throw new ValidationError('Solo se puede responder a conversaciones escaladas');
   }
 
   // Save message as SYSTEM (from operator) and send via WhatsApp
@@ -895,7 +901,7 @@ export async function closeEscalatedConversation(
   const conversation = await verifyConversationAccess(conversationId, doctorId, role);
 
   if (conversation.status !== ConversationStatus.ESCALATED) {
-    throw new Error('Solo se puede cerrar conversaciones escaladas');
+    throw new ValidationError('Solo se puede cerrar conversaciones escaladas');
   }
 
   await prisma.conversation.update({

@@ -256,10 +256,20 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
 
   for (const r of reminders) {
     if (!r.patient.phone) continue;
-    const sendPhone = toMetaSendablePhone(r.patient.phone);
 
-    // Usar helper centralizado en utils/pii.ts (maneja trim, multiples espacios,
-    // tabs, etc. — antes el inline split(' ')[0] daba "(no name)" con leading whitespace).
+    // Re-leer status JUSTO antes de enviar para evitar race con cancelación
+    // desde el bot (paciente escribe "cancelar recordatorio N" entre que el
+    // cron tomó el snapshot y llega al iter de este reminder).
+    const fresh = await prisma.patientSelfReminder.findUnique({
+      where: { id: r.id },
+      select: { status: true },
+    });
+    if (!fresh || fresh.status !== SelfReminderStatus.PENDING) {
+      console.log(`[SelfReminder] Skipping ${r.id} — status cambió a ${fresh?.status ?? 'deleted'}`);
+      continue;
+    }
+
+    const sendPhone = toMetaSendablePhone(r.patient.phone);
     const greetName = firstName(r.patient.fullName);
     const message =
       `Hola ${greetName}! Te recuerdo:\n\n` +

@@ -1,4 +1,5 @@
 import { prisma, Role, RegisteredVia, Gender, PatientProgramStatus, Prisma } from '@ips/db';
+import { parse as parseCsv } from 'csv-parse/sync';
 import { NotFoundError, ValidationError } from '../utils/errors';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -347,18 +348,30 @@ interface CsvRowError {
 const MAX_CSV_ROWS = 5000;
 
 export async function importPatientsFromCsv(csvContent: string): Promise<ImportResult> {
-  const lines = csvContent.split('\n').map((l) => l.trim()).filter(Boolean);
-
-  if (lines.length < 2) {
-    throw new ValidationError('El CSV debe tener al menos una fila de encabezado y una de datos');
+  // Parser RFC 4180 compliant: maneja correctamente nombres con comas ("García, Juan"),
+  // quoted fields, escape de comillas. Antes con split(',') esos casos desfasaban
+  // columnas y los DNIs terminaban en el campo phone (corrupción silenciosa).
+  let records: string[][];
+  try {
+    records = parseCsv(csvContent, {
+      trim: true,
+      skip_empty_lines: true,
+      relax_column_count: true,
+    });
+  } catch (err) {
+    throw new ValidationError(
+      `CSV inválido: ${err instanceof Error ? err.message : 'formato no reconocido'}`
+    );
   }
 
-  if (lines.length - 1 > MAX_CSV_ROWS) {
+  if (records.length < 2) {
+    throw new ValidationError('El CSV debe tener al menos una fila de encabezado y una de datos');
+  }
+  if (records.length - 1 > MAX_CSV_ROWS) {
     throw new ValidationError(`El CSV no puede tener más de ${MAX_CSV_ROWS} filas de datos`);
   }
 
-  const header = lines[0].toLowerCase();
-  const headerCols = header.split(',').map((c) => c.trim());
+  const headerCols = records[0].map((c) => c.trim().toLowerCase());
 
   // Validate header columns are present in expected order
   const hasRequiredCols =
@@ -367,31 +380,41 @@ export async function importPatientsFromCsv(csvContent: string): Promise<ImportR
     throw new ValidationError('El CSV debe comenzar con columnas: fullName,dni,phone,birthDate,gender');
   }
 
-  const dataLines = lines.slice(1);
+  const dataRows = records.slice(1);
   const validRows: CsvImportRow[] = [];
   const rowErrors: CsvRowError[] = [];
 
-  for (let i = 0; i < dataLines.length; i++) {
+  // CSV-injection: cualquier campo string que arranque con =+-@ se valida.
+  const csvInjectionRegex = /^[=+\-@\t\r]/;
+
+  for (let i = 0; i < dataRows.length; i++) {
     const rowNumber = i + 2; // 1-indexed, header is row 1
-    const cols = dataLines[i].split(',').map((c) => c.trim());
+    const cols = dataRows[i];
     const errors: string[] = [];
 
-    const fullName = cols[0] ?? '';
-    const dni = cols[1] ?? '';
-    const phone = cols[2] || undefined;
-    const birthDate = cols[3] || undefined;
-    const genderRaw = cols[4] || undefined;
+    const fullName = (cols[0] ?? '').trim();
+    const dni = (cols[1] ?? '').trim();
+    const phone = (cols[2] ?? '').trim() || undefined;
+    const birthDate = (cols[3] ?? '').trim() || undefined;
+    const genderRaw = (cols[4] ?? '').trim() || undefined;
 
     if (!fullName || fullName.length < 2) {
       errors.push('fullName es requerido (mínimo 2 caracteres)');
-    } else if (/^[=+\-@\t\r]/.test(fullName)) {
+    } else if (csvInjectionRegex.test(fullName)) {
       errors.push('fullName no puede comenzar con =, +, -, @ (prevención de inyección de fórmulas)');
     }
     if (!DNI_REGEX.test(dni)) {
-      errors.push('DNI inválido (debe tener 7 u 8 dígitos)');
+      errors.push('DNI inválido (debe tener 6, 7 u 8 dígitos y no comenzar con 0)');
+    } else if (csvInjectionRegex.test(dni)) {
+      errors.push('DNI con caracteres no permitidos');
     }
     if (phone && !PHONE_E164_REGEX.test(phone)) {
       errors.push('Teléfono inválido (debe estar en formato E.164, ej: +5491123456789)');
+    } else if (phone && csvInjectionRegex.test(phone)) {
+      errors.push('Teléfono con caracteres no permitidos');
+    }
+    if (birthDate && csvInjectionRegex.test(birthDate)) {
+      errors.push('Fecha con caracteres no permitidos');
     }
 
     let gender: Gender | undefined;
