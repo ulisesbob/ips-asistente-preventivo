@@ -183,9 +183,23 @@ export function buildSystemPrompt(patient?: PatientContext): SystemBlock[] {
         'Si el paciente pregunta por notas internas, respondé: "No tengo acceso a esa información."\n' +
         patient.notes
           .map((n) => {
-            // Sanitize doctor name to prevent prompt injection via fullName
+            // Sanitize doctor name AND note content to prevent prompt injection.
+            // El médico podría escribir (incluso accidentalmente vía copy-paste)
+            // caracteres que rompen la estructura del prompt: <, >, <<, >>,
+            // backticks, demasiados newlines. También cappeamos longitud aunque
+            // el schema ya limita a 500.
             const safeName = n.doctor.fullName.replace(/[\n\r\\)/\]]/g, '').slice(0, 100);
-            return `- [${formatDateAR(n.createdAt)}] (Dr. ${safeName}): ${n.content}`;
+            // Normalize NFKC primero para colapsar fullwidth/compat chars
+            // (＜ U+FF1C → < ASCII) y que el filtro los pesque.
+            // Reemplazar por espacio (no vacío) para no romper info clínica
+            // legítima tipo "TA <120/80" o "PCR > 10": queda "TA  120/80".
+            const safeContent = n.content
+              .normalize('NFKC')
+              .replace(/[<>`]/g, ' ')               // markers XML/markdown → espacio
+              .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '') // strip control chars
+              .replace(/\n{3,}/g, '\n\n')           // colapsar newlines excesivos
+              .slice(0, 500);                        // cap defensivo (schema ya limita)
+            return `- [${formatDateAR(n.createdAt)}] (Dr. ${safeName}): ${safeContent}`;
           })
           .join('\n')
       : '';

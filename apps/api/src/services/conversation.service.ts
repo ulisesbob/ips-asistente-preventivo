@@ -373,6 +373,7 @@ async function handleRegistration(
         id: true,
         fullName: true,
         phone: true,
+        registeredVia: true,
         programs: {
           where: { status: PatientProgramStatus.ACTIVE },
           include: {
@@ -387,17 +388,30 @@ async function handleRegistration(
     let programNames: string[] = [];
 
     if (existing) {
-      // SECURITY: If the patient already has a DIFFERENT phone linked,
-      // do NOT silently reassign — potential hijacking attempt.
-      if (existing.phone && existing.phone !== e164Phone) {
+      // SECURITY: 2 vectores de hijack se manejan con el MISMO mensaje genérico
+      // (anti user-enumeration: no confirmar si el DNI existe ni en qué estado).
+      //
+      // (a) DNI ya vinculado a otro teléfono — alguien intenta reasignar.
+      // (b) DNI sin teléfono Y fue cargado por PANEL/CSV — atacante con DNI
+      //     real podría tomar control de la ficha. Solo BOT (registros previos
+      //     via bot) se permite auto-link, porque ese paciente ya proporcionó
+      //     su teléfono al registrarse y vino a través del flujo controlado.
+      const otherPhoneLinked = existing.phone && existing.phone !== e164Phone;
+      const panelCsvWithoutPhone =
+        existing.phone === null && existing.registeredVia !== RegisteredVia.BOT;
+
+      if (otherPhoneLinked || panelCsvWithoutPhone) {
+        const reason = otherPhoneLinked ? 'phone_mismatch' : `panel_csv_no_phone(${existing.registeredVia})`;
         console.warn(
-          `[Security] DNI ***${dni.slice(-3)} ya vinculado a teléfono diferente. ` +
-          `Intento desde: ${maskPhone(e164Phone)}. Vinculación rechazada.`
+          `[Security] DNI ***${dni.slice(-3)} rejected (${reason}) from ${maskPhone(e164Phone)}.`
         );
         registrationState.delete(phone);
+        // Mensaje único y deliberadamente vago. NO confirma existencia del DNI
+        // ni el motivo exacto del rechazo — evita user enumeration.
         const rejection =
-          'Tu DNI ya está asociado a otro número de WhatsApp. ' +
-          `Para modificar tu número, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
+          `No pudimos validar tu identidad automáticamente. ` +
+          `Acercate a una delegación del IPS con tu DNI para que un médico active tu WhatsApp. ` +
+          `Para consultas: ${config.IPS_SUPPORT_PHONE}.`;
         await sendTextMessage(toSendablePhone(phone), rejection);
         return;
       }
