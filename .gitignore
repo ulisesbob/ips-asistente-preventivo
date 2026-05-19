@@ -9,4 +9,10 @@ dist/
 .turbo/
 coverage/
 *.tsbuildinfo
+
+# Claude / IDE / external skills (local only, no parte del proyecto)
 .claude/
+.agents/
+.kiro/
+skills-lock.json
+
