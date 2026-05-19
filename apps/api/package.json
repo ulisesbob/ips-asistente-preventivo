@@ -7,7 +7,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "followup:dry-run": "tsx scripts/followup-dry-run.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
