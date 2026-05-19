@@ -1,4 +1,5 @@
-import { prisma, Role, PatientProgramStatus, ReminderStatus, Prisma } from '@ips/db';
+import { prisma, Role, PatientProgramStatus, ReminderStatus, RegisteredVia, Prisma } from '@ips/db';
+import { MAX_FOLLOWUPS, GRACE_PERIOD_DAYS } from './patient-followup.service';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -11,11 +12,22 @@ export interface AlertPatient {
   missedReminders?: number;
 }
 
+export interface NoProgramPatient {
+  id: string;
+  fullName: string;
+  dni: string;
+  daysSinceRegister: number;
+  reminderCount: number;
+}
+
 export interface DashboardAlerts {
   overdueWarning: AlertPatient[];   // >30 days, <=60 days
   overdueCritical: AlertPatient[];  // >60 days
   noResponse: AlertPatient[];       // 3+ reminders without reply
   optedOut: AlertPatient[];         // consent = false
+  // Followup alerts (pacientes que se registraron pero ningún médico los inscribió):
+  noProgramRecent: NoProgramPatient[];     // registrados >7 días sin programa, todavía recibiendo recordatorios
+  noProgramAbandoned: NoProgramPatient[];  // ya recibieron 3 recordatorios sin enrolar — requieren acción admin
 }
 
 export interface DashboardStats {
@@ -316,10 +328,57 @@ export async function getAlerts(doctorId: string, role: Role): Promise<Dashboard
     programName: p.programs[0]?.program.name ?? '—',
   }));
 
+  // Followup alerts: pacientes registrados sin programa.
+  // Solo visibles para ADMIN — los DOCTOR no necesitan ver estas (no son
+  // pacientes de sus programas porque aún no tienen ninguno).
+  let noProgramRecent: NoProgramPatient[] = [];
+  let noProgramAbandoned: NoProgramPatient[] = [];
+
+  if (isAdmin) {
+    const graceCutoff = daysAgoUTC(GRACE_PERIOD_DAYS);
+    const noProgramPatients = await prisma.patient.findMany({
+      where: {
+        registeredVia: RegisteredVia.BOT,
+        whatsappLinked: true,
+        consent: true,
+        createdAt: { lt: graceCutoff },
+        programs: { none: { status: PatientProgramStatus.ACTIVE } },
+      },
+      take: 100,
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        fullName: true,
+        dni: true,
+        createdAt: true,
+        noProgramReminderCount: true,
+      },
+    });
+
+    const mapNoProgram = (p: typeof noProgramPatients[number]): NoProgramPatient => ({
+      id: p.id,
+      fullName: p.fullName,
+      dni: p.dni,
+      daysSinceRegister: Math.floor(
+        (todayUTC.getTime() - p.createdAt.getTime()) / (1000 * 60 * 60 * 24)
+      ),
+      reminderCount: p.noProgramReminderCount,
+    });
+
+    noProgramAbandoned = noProgramPatients
+      .filter((p) => p.noProgramReminderCount >= MAX_FOLLOWUPS)
+      .map(mapNoProgram);
+    noProgramRecent = noProgramPatients
+      .filter((p) => p.noProgramReminderCount < MAX_FOLLOWUPS)
+      .map(mapNoProgram);
+  }
+
   return {
     overdueWarning,
     overdueCritical,
     noResponse,
     optedOut,
+    noProgramRecent,
+    noProgramAbandoned,
   };
 }

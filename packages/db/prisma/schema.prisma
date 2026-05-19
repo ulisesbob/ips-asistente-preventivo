@@ -100,6 +100,12 @@ model Patient {
   whatsappLinked Boolean       @default(false)
   createdAt      DateTime      @default(now()) @db.Timestamptz()
 
+  // Followup tracking — para pacientes registrados sin programa.
+  // El cron diario les manda hasta N recordatorios espaciados para que se
+  // acerquen a inscribirse. Sin esto, quedaban en limbo silencioso.
+  lastNoProgramReminderAt DateTime? @db.Timestamptz()
+  noProgramReminderCount  Int       @default(0)
+
   programs      PatientProgram[]
   reminders     Reminder[]
   conversations Conversation[]

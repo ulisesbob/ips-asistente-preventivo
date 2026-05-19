@@ -8,6 +8,7 @@ import { startReminderCron, stopReminderCron } from './services/reminder.service
 import { startMedicationCron, stopMedicationCron } from './services/medication-cron';
 import { startSurveyCron, stopSurveyCron } from './services/survey-cron';
 import { startSelfReminderCron, stopSelfReminderCron } from './services/self-reminder-cron';
+import { startFollowupCron, stopFollowupCron } from './services/followup-cron';
 import { logger } from './utils/logger';
 
 // ─── Server Start ─────────────────────────────────────────────────────────────
@@ -38,6 +39,7 @@ const server = app.listen(PORT, () => {
       startMedicationCron();
       startSurveyCron();
       startSelfReminderCron();
+      startFollowupCron();
     });
 });
 
@@ -59,6 +61,7 @@ async function shutdown(signal: string): Promise<void> {
   stopMedicationCron();
   stopSurveyCron();
   stopSelfReminderCron();
+  stopFollowupCron();
   server.close(async () => {
     await prisma.$disconnect();
     logger.info('Server shut down cleanly', { event: 'server_shutdown' });

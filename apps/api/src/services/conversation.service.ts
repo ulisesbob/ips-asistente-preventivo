@@ -468,11 +468,20 @@ async function handleRegistration(
         `¿En qué puedo ayudarte?\n\n` +
         `Esta información es orientativa. Para consultas sobre su caso, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
     } else {
+      // Onboarding explícito para no-programa: el paciente queda registrado pero
+      // SIN inscripción a ningún programa. Le damos pasos claros para que se
+      // acerque al IPS. El cron de followup se encarga de recordárselo cada 7
+      // días si nadie lo inscribe (max 3 veces).
       welcome =
-        `Listo, ${patientName}! Ya quedaste registrado/a en el sistema. ` +
-        `Un médico completará tu información y podrá inscribirte en los programas que correspondan.\n\n` +
-        `¿Tenés alguna consulta general?\n\n` +
-        `Esta información es orientativa. Para consultas sobre su caso, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
+        `Listo, ${patientName}! Ya quedaste registrado/a en el sistema del IPS.\n\n` +
+        `📋 *Próximo paso — inscripción en un programa*\n` +
+        `Para que un médico te asigne a un programa de salud (diabetes, hipertensión, etc.):\n` +
+        `1. Acercate al Área de Programas Especiales (Junín 177, Posadas) ` +
+        `o a tu delegación más cercana.\n` +
+        `2. Llevá DNI + carnet de afiliado.\n` +
+        `3. Un médico te va a evaluar e inscribir.\n\n` +
+        `Mientras tanto podés preguntarme cualquier consulta general sobre el IPS.\n\n` +
+        `Esta información es orientativa. Para consultas, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
     }
 
     await saveMessages(e164Phone, patientId, text, welcome);
