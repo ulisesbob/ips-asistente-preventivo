@@ -244,6 +244,13 @@ export function buildSystemPrompt(patient?: PatientContext): SystemBlock[] {
   // Block 1: prefix estable (cached). Block 2: data del paciente (dinámica).
   // Importante: el DISCLAIMER va en el block ESTABLE — la regla "incluí en primer
   // mensaje" la maneja el modelo, no depende del orden.
+  // Sanitize patient name (defense-in-depth: nombre viene de registro vía
+  // bot/CSV/panel, podría incluir caracteres que rompen estructura del prompt).
+  const safePatientName = patient.fullName
+    .normalize('NFKC')
+    .replace(/[<>`\n\r]/g, ' ')
+    .slice(0, 100);
+
   return [
     {
       type: 'text',
@@ -253,7 +260,7 @@ export function buildSystemPrompt(patient?: PatientContext): SystemBlock[] {
     {
       type: 'text',
       text: `DATOS DEL PACIENTE:
-- Nombre: ${patient.fullName}
+- Nombre: ${safePatientName}
 ${programSection}
 ${medsInfo}
 ${selfRemindersInfo}

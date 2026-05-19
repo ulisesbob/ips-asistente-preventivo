@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireAdmin } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error-handler';
 import * as knowledgeService from '../services/knowledge.service';
 
@@ -73,6 +73,7 @@ router.get(
 router.post(
   '/',
   requireAuth,
+  requireAdmin,
   validate(createBodySchema),
   asyncHandler(async (req: Request, res: Response) => {
     const body = req.body as z.infer<typeof createBodySchema>;
@@ -86,6 +87,7 @@ router.post(
 router.patch(
   '/:id',
   requireAuth,
+  requireAdmin,
   validate(idParamsSchema, 'params'),
   validate(updateBodySchema),
   asyncHandler(async (req: Request, res: Response) => {
@@ -101,6 +103,7 @@ router.patch(
 router.delete(
   '/:id',
   requireAuth,
+  requireAdmin,
   validate(idParamsSchema, 'params'),
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params as z.infer<typeof idParamsSchema>;

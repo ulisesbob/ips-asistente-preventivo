@@ -8,6 +8,7 @@ import {
   verifyWebhookSignature,
 } from '../services/whatsapp.service';
 import { handleIncomingMessage } from '../services/conversation.service';
+import { maskPhone } from '../utils/pii';
 
 const whatsappRouter = Router();
 
@@ -126,7 +127,7 @@ whatsappRouter.post(
           try {
             await handleIncomingMessage(msg.from, msg.text, msg.displayName);
           } catch (error) {
-            console.error(`[WhatsApp] Error procesando mensaje de ${msg.from}:`, error);
+            console.error(`[WhatsApp] Error procesando mensaje de ${maskPhone(msg.from)}:`, error);
           }
         }
       })().catch((error) => {

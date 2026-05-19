@@ -23,22 +23,22 @@ const server = app.listen(PORT, () => {
     aiConfigured: !!config.ANTHROPIC_API_KEY,
   });
 
-  // Start crons after server is ready
-  startReminderCron();
-  startMedicationCron();
-  startSurveyCron();
-  startSelfReminderCron();
-
-  // Warm-up post-listen: pegarle a la DB (despierta Neon serverless ~3-5s) y
-  // cargar la KB en cache. Sin esto el primer paciente del día espera 5s al
-  // recibir respuesta del bot (Render duerme + Neon cold start).
-  // Fire-and-forget: si falla, el server arranca igual y se recupera al primer request.
-  warmUp().catch((err) => {
-    logger.warn('Warm-up failed (server still healthy)', {
-      event: 'warmup',
-      error: err instanceof Error ? err.message : String(err),
+  // Warm-up FIRST, then start crons. Si arrancamos crons antes y un cron dispara
+  // en los primeros 3-5s mientras Neon despierta, podría tirar timeout (error-detective).
+  warmUp()
+    .catch((err) => {
+      logger.warn('Warm-up failed (server still healthy)', {
+        event: 'warmup',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    })
+    .finally(() => {
+      // Start crons after warm-up regardless of success
+      startReminderCron();
+      startMedicationCron();
+      startSurveyCron();
+      startSelfReminderCron();
     });
-  });
 });
 
 async function warmUp(): Promise<void> {

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { config } from '../config/env';
+import { maskPhone } from '../utils/pii';
 
 const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01';
 
@@ -48,7 +49,7 @@ export async function sendTwilioTextMessage(
     if (!response.ok) {
       const errorBody = await response.text();
       console.error(
-        `[Twilio] Error enviando mensaje a ${toE164WithPlus}: ${response.status} — ${errorBody}`
+        `[Twilio] Error enviando mensaje a ${maskPhone(toE164WithPlus)}: ${response.status} — ${errorBody}`
       );
       return false;
     }
