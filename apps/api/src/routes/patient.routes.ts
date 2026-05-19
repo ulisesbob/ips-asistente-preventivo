@@ -28,7 +28,9 @@ const createBodySchema = z.object({
     .refine((v) => !/^[=+\-@\t\r]/.test(v), 'El nombre no puede comenzar con caracteres especiales (=, +, -, @)'),
   dni: z
     .string()
-    .regex(/^\d{7,8}$/, 'DNI debe tener 7 u 8 dígitos numéricos'),
+    // 6-8 dígitos, primer dígito no-cero (audit #23 — sin leading zeros).
+    // 6 dígitos contempla pacientes ancianos del padrón crónico.
+    .regex(/^[1-9]\d{5,7}$/, 'DNI debe tener 6 a 8 dígitos y no comenzar con 0'),
   phone: z
     .string()
     .regex(/^\+[1-9]\d{1,14}$/, 'Teléfono debe estar en formato E.164')

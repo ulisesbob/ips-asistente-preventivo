@@ -286,7 +286,7 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
       }
       sent++;
     } catch (err) {
-      console.error(`[SelfReminder] Error sending to ${sendPhone}:`, err);
+      console.error(`[SelfReminder] Error sending to ***${sendPhone.slice(-4)}:`, err);
       // Cancel permanently overdue reminders (>48h past) to avoid infinite retries
       const ageMs = Date.now() - new Date(r.reminderDate).getTime();
       if (ageMs > 48 * 60 * 60 * 1000) {
@@ -339,6 +339,9 @@ export function parseSelfReminderTag(
 ): { found: boolean; data?: CreateSelfReminderInput; cleanResponse: string } {
   // Match until closing }>>, allowing } inside JSON values (e.g. "Turno {sala 3}")
   const tagRegex = /<<SELF_REMINDER:(\{.*?\})>>/;
+  // Strip-all variant (audit #22): if AI accidentally emits multiple tags,
+  // we still want NONE visible to the patient. We only act on the first one.
+  const tagRegexGlobal = /<<SELF_REMINDER:\{.*?\}>>/g;
   const match = aiResponse.match(tagRegex);
 
   if (!match) {
@@ -355,14 +358,15 @@ export function parseSelfReminderTag(
     };
 
     if (!data.description || !data.date || !data.time) {
-      return { found: false, cleanResponse: aiResponse };
+      // Still strip the malformed tag so the patient doesn't see it.
+      return { found: false, cleanResponse: aiResponse.replace(tagRegexGlobal, '').trim() };
     }
 
-    // Strip the tag from the response
-    const cleanResponse = aiResponse.replace(tagRegex, '').trim();
+    // Strip ALL occurrences from the response
+    const cleanResponse = aiResponse.replace(tagRegexGlobal, '').trim();
     return { found: true, data, cleanResponse };
   } catch {
-    return { found: false, cleanResponse: aiResponse };
+    return { found: false, cleanResponse: aiResponse.replace(tagRegexGlobal, '').trim() };
   }
 }
 
@@ -371,9 +375,10 @@ export function parseSelfReminderTag(
  * Format: <<LIST_REMINDERS>>
  */
 export function parseListRemindersTag(aiResponse: string): { found: boolean; cleanResponse: string } {
-  const tagRegex = /<<LIST_REMINDERS>>/;
-  if (tagRegex.test(aiResponse)) {
-    return { found: true, cleanResponse: aiResponse.replace(tagRegex, '').trim() };
+  // Use .includes() instead of regex.test() because /g regex.test() mutates
+  // lastIndex and gives flaky results if the regex is ever hoisted to module scope.
+  if (aiResponse.includes('<<LIST_REMINDERS>>')) {
+    return { found: true, cleanResponse: aiResponse.replace(/<<LIST_REMINDERS>>/g, '').trim() };
   }
   return { found: false, cleanResponse: aiResponse };
 }
@@ -386,6 +391,7 @@ export function parseCancelReminderTag(
   aiResponse: string
 ): { found: boolean; index?: number; cleanResponse: string } {
   const tagRegex = /<<CANCEL_REMINDER:(\d+)>>/;
+  const tagRegexGlobal = /<<CANCEL_REMINDER:\d+>>/g;
   const match = aiResponse.match(tagRegex);
 
   if (!match) {
@@ -393,7 +399,8 @@ export function parseCancelReminderTag(
   }
 
   const index = parseInt(match[1]);
-  const cleanResponse = aiResponse.replace(tagRegex, '').trim();
+  // Strip all instances (audit #22 — don't leak duplicates to the patient).
+  const cleanResponse = aiResponse.replace(tagRegexGlobal, '').trim();
   return { found: true, index, cleanResponse };
 }
 

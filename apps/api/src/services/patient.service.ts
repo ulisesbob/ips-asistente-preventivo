@@ -329,7 +329,9 @@ export async function updatePatient(
 
 // ─── CSV IMPORT ───────────────────────────────────────────────────────────────
 
-const DNI_REGEX = /^\d{7,8}$/;
+// DNI argentino: 6-8 dígitos, primer dígito no-cero (audit #23 + code-review).
+// 6 dígitos cubre pacientes nacidos antes de ~1930 (relevante para población crónica).
+const DNI_REGEX = /^[1-9]\d{5,7}$/;
 const PHONE_E164_REGEX = /^\+[1-9]\d{1,14}$/;
 
 interface CsvImportRow {

@@ -50,31 +50,48 @@ export async function processSurveyResponse(
 
   if (!pending) return null; // no pending survey
 
-  const textLower = text.trim().toLowerCase();
+  // Normalize: lowercase + strip accents + strip punctuation/whitespace.
+  // Audit #20: previously only "si"/"sí"/"1"/"no"/"2" matched — patients
+  // saying "sip", "dale", "obvio", "nop" got dropped to AI flow and the survey
+  // never completed, inflating "no respondió" metrics.
+  const textNorm = text
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^\w\s]/g, '')
+    .trim();
+
+  // Lista corta de afirmaciones inequívocas. "ok"/"claro"/"listo" se removieron
+  // porque pueden ser ACK casual sin asistencia real (code-review feedback).
+  const YES_WORDS = ['si', 'sip', 'sii', 'siii', 'dale', 'obvio', 'yes', '1'];
+  const NO_WORDS = ['no', 'nop', 'nope', 'tampoco', '2'];
 
   // Step 1: attended? (Sí/No)
   if (pending.attended === null) {
-    if (textLower === 'si' || textLower === 'sí' || textLower === '1') {
+    if (YES_WORDS.includes(textNorm)) {
       await prisma.survey.update({
         where: { id: pending.id },
         data: { attended: true },
       });
       return '¡Bien! ¿Cómo calificarías la atención? Respondé con un número del 1 al 5 (1=Mala, 5=Excelente).';
-    } else if (textLower === 'no' || textLower === '2') {
+    }
+    if (NO_WORDS.includes(textNorm)) {
       await prisma.survey.update({
         where: { id: pending.id },
         data: { attended: false, completedAt: new Date() },
       });
       return 'Lamentamos que no hayas podido asistir. Si necesitás reprogramar tu control, comuníquese al 0800-888-0109.';
     }
-    // Didn't match yes/no — not a survey response
-    return null;
+    return null; // not a survey response
   }
 
-  // Step 2: rating (1-5)
+  // Step 2: rating (1-5). Require EXACT single digit so messages like
+  // "3 de mayo" or "necesito turno para el 5" don't get parsed as ratings
+  // (audit #20).
   if (pending.attended === true) {
-    const rating = parseInt(textLower);
-    if (rating >= 1 && rating <= 5) {
+    if (/^[1-5]$/.test(textNorm)) {
+      const rating = parseInt(textNorm, 10);
       await prisma.survey.update({
         where: { id: pending.id },
         data: { rating, completedAt: new Date() },
@@ -83,7 +100,6 @@ export async function processSurveyResponse(
         ? '¡Gracias por tu respuesta! Nos alegra que hayas tenido una buena experiencia.'
         : 'Gracias por tu respuesta. Vamos a trabajar para mejorar la atención.';
     }
-    // Didn't match 1-5 — not a survey response
     return null;
   }
 

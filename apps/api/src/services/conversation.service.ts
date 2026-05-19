@@ -24,10 +24,16 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DNI_REGEX = /^\d{7,8}$/;
+// DNI argentino: 6 a 8 dígitos, primer dígito NO puede ser 0 (audit #23 + code-review).
+// 6 dígitos = personas nacidas antes de ~1930 (todavía vivas en padrón de salud crónica).
+// 7 dígitos = generaciones medias, 8 dígitos = post-1990. Rango: 100.000-99.999.999.
+const DNI_REGEX = /^[1-9]\d{5,7}$/;
 const E164_PHONE_REGEX = /^\d{7,15}$/;
 const REGISTRATION_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_HISTORY_FOR_DB = 20; // Align with AI service MAX_HISTORY_MESSAGES
+// If an ESCALATED conversation has no operator activity in this window, auto-reopen
+// so the patient isn't stuck waiting forever (audit #16).
+const ESCALATION_STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // Escalation keywords — patient wants to talk to a human (pre-normalized, no accents)
 const ESCALATION_KEYWORDS = [
@@ -58,6 +64,25 @@ function toSendablePhone(phone: string): string {
     p = '54' + p.slice(3);
   }
   return p;
+}
+
+// ─── PII masking for logs (audit #24) ────────────────────────────────────────
+// Production logs (Render console) are accessible to whoever has the dashboard.
+// Mask patient identifiers so we can still correlate without leaking PII.
+
+function maskId(id: string): string {
+  if (!id) return '';
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
+}
+
+function maskPhone(phone: string | null | undefined): string {
+  if (!phone) return '(no phone)';
+  const last4 = phone.slice(-4);
+  return `***${last4}`;
+}
+
+function firstName(fullName: string): string {
+  return (fullName ?? '').split(' ')[0] || '(no name)';
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -117,7 +142,7 @@ export async function handleIncomingMessage(
 
   // Validate phone format
   if (!E164_PHONE_REGEX.test(normalizedPhone)) {
-    console.warn(`[WhatsApp] Número de teléfono inválido ignorado: ${phone}`);
+    console.warn(`[WhatsApp] Número de teléfono inválido ignorado: ${maskPhone(phone)}`);
     return;
   }
 
@@ -157,19 +182,58 @@ export async function handleIncomingMessage(
     return;
   }
 
+  // 3.5. Auto-link patients imported by CSV/panel (no WhatsApp linked yet).
+  // Then fall through to the normal flow so escalation/BAJA/etc. work on first message.
+  if (patient && !patient.whatsappLinked) {
+    await autoLinkPatient(normalizedPhone, e164Phone, patient);
+    if (!patient.consent) return; // opted out — linked silently, don't process further
+    patient.whatsappLinked = true; // local mutation so the next branch runs
+  }
+
   // 4. Check if conversation is ESCALATED — don't respond with AI, just save message
   if (patient && patient.whatsappLinked) {
     const activeConv = await prisma.conversation.findFirst({
       where: { phone: e164Phone, status: ConversationStatus.ESCALATED },
-      select: { id: true },
+      select: {
+        id: true,
+        // Look at the last NON-USER message: either the bot's "voy a derivar" ack
+        // (sent at escalation time) OR an operator reply. Both serve as the baseline
+        // for "is the operator still engaging?". If neither exists (extreme edge),
+        // default to NOT stale so we don't drop someone who just escalated.
+        messages: {
+          where: { role: { in: [MessageRole.ASSISTANT, MessageRole.SYSTEM] } },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { createdAt: true },
+        },
+      },
     });
 
     if (activeConv) {
-      // Save message but don't respond — human operator handles this from the panel
-      await prisma.message.create({
-        data: { conversationId: activeConv.id, role: MessageRole.USER, content: text },
-      });
-      return;
+      // Auto-reopen if operator has been silent for too long (audit #16).
+      // Without this the patient is stuck forever — every future message gets
+      // saved and ignored.
+      const lastNonUserMsgAt = activeConv.messages[0]?.createdAt;
+      const isStale =
+        !!lastNonUserMsgAt &&
+        Date.now() - lastNonUserMsgAt.getTime() > ESCALATION_STALE_MS;
+
+      if (isStale) {
+        await prisma.conversation.update({
+          where: { id: activeConv.id },
+          data: { status: ConversationStatus.OPEN },
+        });
+        console.log(
+          `[Escalation] Auto-reopened stale ESCALATED conv ${activeConv.id} (patient ${maskId(patient.id)})`
+        );
+        // Fall through to normal handlers (survey / reminder flow / AI chat).
+      } else {
+        // Operator is actively handling — save patient message, don't respond.
+        await prisma.message.create({
+          data: { conversationId: activeConv.id, role: MessageRole.USER, content: text },
+        });
+        return;
+      }
     }
 
     // 5. Check for pending survey response
@@ -207,32 +271,55 @@ export async function handleIncomingMessage(
     return;
   }
 
-  // 5. If patient found but WA not linked (imported via CSV/panel) → link and go to chat
-  if (patient && !patient.whatsappLinked) {
-    // Always link the phone, but respect consent before sending messages
-    await prisma.patient.update({
-      where: { id: patient.id },
-      data: { whatsappLinked: true },
-    });
-
-    if (!patient.consent) {
-      // Patient opted out — link silently, don't send messages
-      return;
-    }
-
-    const greeting = patient.programs.length > 0
-      ? `Hola ${patient.fullName}! Soy el asistente virtual del IPS. ` +
-        `Estás inscripto/a en: ${patient.programs.map((pp) => pp.program.name).join(', ')}. ` +
-        `¿En qué puedo ayudarte?`
-      : `Hola ${patient.fullName}! Soy el asistente virtual del IPS. ` +
-        `Ya estás registrado/a. ¿En qué puedo ayudarte?`;
-
-    await saveMessageAndReply(normalizedPhone, e164Phone, patient.id, text, greeting);
-    return;
-  }
-
   // 6. Not found → registration flow
   await handleRegistration(normalizedPhone, e164Phone, text);
+}
+
+/**
+ * Auto-link patient on first WhatsApp contact (was imported by CSV/panel without
+ * having linked their WA number yet). Sends a one-time greeting and returns so
+ * the caller can fall through to the normal handler chain.
+ *
+ * Audit #17: previously this branch short-circuited and ignored escalation
+ * keywords, BAJA, surveys, etc. Now we greet + fall through.
+ */
+async function autoLinkPatient(
+  normalizedPhone: string,
+  e164Phone: string,
+  patient: { id: string; fullName: string; consent: boolean; programs: Array<{ program: { name: string } }> }
+): Promise<void> {
+  // Atomic check-and-update so two concurrent webhooks don't both send the
+  // welcome greeting. Whoever wins the race flips whatsappLinked false→true
+  // and runs the greeting; the loser gets P2025 and silently returns.
+  const updated = await prisma.patient
+    .update({
+      where: { id: patient.id, whatsappLinked: false },
+      data: { whatsappLinked: true },
+      select: { id: true },
+    })
+    .catch((err: { code?: string }) => {
+      if (err.code === 'P2025') return null; // already linked by concurrent request
+      throw err;
+    });
+
+  if (!updated) return; // concurrent request already greeted this patient
+
+  if (!patient.consent) return; // opted out — link silently
+
+  const greeting =
+    patient.programs.length > 0
+      ? `Hola ${firstName(patient.fullName)}! Soy el asistente virtual del IPS. ` +
+        `Estás inscripto/a en: ${patient.programs.map((pp) => pp.program.name).join(', ')}.`
+      : `Hola ${firstName(patient.fullName)}! Soy el asistente virtual del IPS. ` +
+        `Ya estás registrado/a.`;
+
+  // Greeting as ASSISTANT message; the user's actual message gets saved by
+  // whatever handler runs in the normal flow.
+  const conversation = await getOrCreateConversation(e164Phone, patient.id);
+  await prisma.message.create({
+    data: { conversationId: conversation.id, role: MessageRole.ASSISTANT, content: greeting },
+  });
+  await sendTextMessage(toSendablePhone(normalizedPhone), greeting);
 }
 
 // ─── Registration Flow ────────────────────────────────────────────────────────
@@ -244,16 +331,21 @@ async function handleRegistration(
 ): Promise<void> {
   const state = getRegistrationState(phone);
 
-  // Step 1: First message ever — ask for name
-  // Set state AFTER send succeeds to avoid broken flow if send fails
+  // Step 1: First message ever — ask for name.
+  // Send BEFORE advancing state so a transient WhatsApp failure doesn't strand
+  // the patient with the bot expecting a name they were never asked for (audit #18).
   if (!state) {
     const greeting =
       'Hola! Soy el asistente virtual del IPS (Instituto de Previsión Social de Misiones). ' +
       'Para poder ayudarte, necesito algunos datos.\n\n' +
       '¿Cuál es tu nombre completo?';
 
+    const sent = await sendTextMessage(toSendablePhone(phone), greeting);
+    if (!sent) {
+      console.warn(`[Registration] No se pudo enviar greeting a ${maskPhone(phone)} — no avanzo estado`);
+      return; // patient will retry; next message will hit this branch again
+    }
     await saveSystemMessage(e164Phone, null, text, greeting);
-    await sendTextMessage(toSendablePhone(phone), greeting);
     registrationState.set(phone, { step: 'AWAITING_NAME', createdAt: Date.now() });
     return;
   }
@@ -268,11 +360,18 @@ async function handleRegistration(
       return;
     }
 
-    registrationState.set(phone, { step: 'AWAITING_DNI', tempName: name, createdAt: state.createdAt });
-
+    // Send the "ask for DNI" prompt BEFORE advancing state. If the WhatsApp send
+    // fails, the patient stays in AWAITING_NAME and we'll retry on their next
+    // message instead of silently moving them to AWAITING_DNI for a prompt they
+    // never received (audit #18).
     const askDni = `Gracias, ${name}. ¿Cuál es tu número de DNI? (sin puntos)`;
+    const sent = await sendTextMessage(toSendablePhone(phone), askDni);
+    if (!sent) {
+      console.warn(`[Registration] No se pudo enviar askDni a ${maskPhone(phone)} — no avanzo estado`);
+      return;
+    }
+    registrationState.set(phone, { step: 'AWAITING_DNI', tempName: name, createdAt: state.createdAt });
     await saveMessages(e164Phone, null, text, askDni);
-    await sendTextMessage(toSendablePhone(phone), askDni);
     return;
   }
 
@@ -311,8 +410,8 @@ async function handleRegistration(
       // do NOT silently reassign — potential hijacking attempt.
       if (existing.phone && existing.phone !== e164Phone) {
         console.warn(
-          `[Security] DNI ${dni} ya vinculado a teléfono diferente. ` +
-          `Intento desde: ${e164Phone}. Vinculación rechazada.`
+          `[Security] DNI ***${dni.slice(-3)} ya vinculado a teléfono diferente. ` +
+          `Intento desde: ${maskPhone(e164Phone)}. Vinculación rechazada.`
         );
         registrationState.delete(phone);
         const rejection =
@@ -462,6 +561,7 @@ async function handleReminderFlow(
 
     // Round minute to nearest 30 (medication cron runs at :00 and :30)
     const roundedMinute = minute < 15 ? 0 : 30;
+    const wasRounded = roundedMinute !== minute;
 
     reminderFlowState.delete(phone);
 
@@ -475,8 +575,13 @@ async function handleReminderFlow(
       );
 
       const timeDisplay = `${String(hour).padStart(2, '0')}:${String(roundedMinute).padStart(2, '0')}`;
+      // Audit #25: si redondeamos la hora, decírselo explícitamente al paciente
+      // (antes se cambiaba 8:15 → 8:30 sin avisar).
+      const roundingNote = wasRounded
+        ? ` (redondeé al horario más cercano porque los recordatorios van cada 30 min)`
+        : '';
       const msg =
-        `Listo! Te voy a recordar *"${state.description}"* todos los días a las ${timeDisplay} hs.\n\n` +
+        `Listo! Te voy a recordar *"${state.description}"* todos los días a las ${timeDisplay} hs${roundingNote}.\n\n` +
         `El recordatorio aparece en tu ficha y tu médico también lo puede ver.`;
       await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
     } catch (err) {
@@ -544,11 +649,12 @@ async function handleChat(
   });
 
   // Debug: log what the AI will see
-  console.log(`[Bot] Patient ${patient.fullName} has ${patient.programs.length} active programs, ${kbEntries.length} KB entries`);
+  console.log(`[Bot] Patient ${maskId(patient.id)} (${firstName(patient.fullName)}) has ${patient.programs.length} active programs, ${kbEntries.length} KB entries`);
   if (kbEntries.length > 0) {
     console.log('[Bot] KB entries:', kbEntries.map((e) => `[${e.category}] ${e.question.slice(0, 50)}`).join(' | '));
   } else {
-    console.warn('[Bot] WARNING: No KB entries found for message:', text.slice(0, 80));
+    // Log length only — patient text may contain DNI/PII (audit #24 follow-up).
+    console.warn(`[Bot] WARNING: No KB entries found (msg length: ${text.length} chars)`);
   }
   if (patient.programs.length > 0) {
     patient.programs.forEach((pp) => {
@@ -593,7 +699,7 @@ async function handleChat(
       return false;
     });
     if (leaked) {
-      console.warn(`[Security] AI response may contain leaked note content for patient ${patient.id}. Replacing.`);
+      console.warn(`[Security] AI response may contain leaked note content for patient ${maskId(patient.id)}. Replacing.`);
       aiResponse =
         'No tengo acceso a esa información. ' +
         '¿Hay algo más en lo que pueda ayudarte?\n\n' +

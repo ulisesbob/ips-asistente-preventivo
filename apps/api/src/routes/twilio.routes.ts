@@ -73,7 +73,8 @@ twilioRouter.post('/webhooks/twilio', webhookLimiter, (req, res) => {
 
       await handleIncomingMessage(phone, body, profileName);
     } catch (error) {
-      console.error(`[Twilio] Error procesando mensaje de ${phone}:`, error);
+      // Mask phone — production logs in Render are accessible to whoever has the dashboard.
+      console.error(`[Twilio] Error procesando mensaje de ***${phone.slice(-4)}:`, error);
     }
   })().catch((error) => {
     console.error('[Twilio] Error inesperado procesando mensaje:', error);

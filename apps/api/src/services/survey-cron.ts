@@ -80,7 +80,7 @@ export function startSurveyCron(): void {
           });
           sent++;
         } catch (err) {
-          console.error(`[SurveyCron] Error sending to ${sendPhone}:`, err);
+          console.error(`[SurveyCron] Error sending to ***${sendPhone.slice(-4)}:`, err);
           failed++;
         }
 

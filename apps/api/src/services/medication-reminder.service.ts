@@ -265,7 +265,7 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
       await sendTextMessage(sendPhone, message);
       sent++;
     } catch (err) {
-      console.error(`[MedReminder] Error sending to ${sendPhone}:`, err);
+      console.error(`[MedReminder] Error sending to ***${sendPhone.slice(-4)}:`, err);
       failed++;
     }
 
