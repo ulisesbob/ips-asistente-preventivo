@@ -95,7 +95,7 @@ router.post(
     const { id } = req.params as z.infer<typeof idParamsSchema>;
     const { message } = req.body as z.infer<typeof replyBodySchema>;
 
-    await sendOperatorReply(id, message, req.doctor!.id);
+    await sendOperatorReply(id, message, req.doctor!.id, req.doctor!.role as Role);
 
     res.status(200).json({ status: 'ok' });
   })
@@ -110,7 +110,7 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params as z.infer<typeof idParamsSchema>;
 
-    await closeEscalatedConversation(id);
+    await closeEscalatedConversation(id, req.doctor!.id, req.doctor!.role as Role);
 
     res.status(200).json({ status: 'ok' });
   })

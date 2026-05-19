@@ -1,6 +1,32 @@
 import { prisma } from '@ips/db';
 import { NotFoundError, ValidationError } from '../utils/errors';
 
+// ─── KB cache in-memory (audit perf #2) ──────────────────────────────────────
+// La KB tiene ~30 entradas y cambia poco (admin la edita rara vez). Cachearla
+// 5 minutos elimina 1 query DB en cada mensaje del bot (hot path).
+
+type CachedKBEntry = { category: string; question: string; answer: string };
+const KB_CACHE_TTL_MS = 5 * 60 * 1000;
+let kbCache: { entries: CachedKBEntry[]; expiresAt: number } | null = null;
+
+async function getAllActiveKBCached(): Promise<CachedKBEntry[]> {
+  if (kbCache && Date.now() < kbCache.expiresAt) {
+    return kbCache.entries;
+  }
+  const entries = await prisma.knowledgeBase.findMany({
+    where: { active: true },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+    select: { category: true, question: true, answer: true },
+  });
+  kbCache = { entries, expiresAt: Date.now() + KB_CACHE_TTL_MS };
+  return entries;
+}
+
+/** Called from CRUD endpoints to force cache refresh after admin changes. */
+export function invalidateKBCache(): void {
+  kbCache = null;
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface CreateKBInput {
@@ -87,7 +113,7 @@ export async function createKBEntry(input: CreateKBInput) {
     throw new ValidationError('La respuesta es requerida');
   }
 
-  return prisma.knowledgeBase.create({
+  const created = await prisma.knowledgeBase.create({
     data: {
       category: input.category.trim(),
       question: input.question.trim(),
@@ -103,6 +129,8 @@ export async function createKBEntry(input: CreateKBInput) {
       active: true,
     },
   });
+  invalidateKBCache();
+  return created;
 }
 
 // ─── UPDATE (admin only) ────────────────────────────────────────────────────
@@ -117,7 +145,7 @@ export async function updateKBEntry(id: string, input: UpdateKBInput) {
     throw new NotFoundError('Entrada no encontrada');
   }
 
-  return prisma.knowledgeBase.update({
+  const updated = await prisma.knowledgeBase.update({
     where: { id },
     data: {
       ...(input.category !== undefined ? { category: input.category.trim() } : {}),
@@ -135,6 +163,8 @@ export async function updateKBEntry(id: string, input: UpdateKBInput) {
       active: true,
     },
   });
+  invalidateKBCache();
+  return updated;
 }
 
 // ─── DELETE (admin only) ─────────────────────────────────────────────────────
@@ -150,6 +180,7 @@ export async function deleteKBEntry(id: string) {
   }
 
   await prisma.knowledgeBase.delete({ where: { id } });
+  invalidateKBCache();
 }
 
 // ─── GET RELEVANT FOR BOT ──────────────────────────────────────────────────
@@ -186,45 +217,24 @@ export async function getRelevantKBForBot(userMessage: string, maxEntries = 5) {
     .filter((w) => w.length >= 3 && !BOT_STOPWORDS.has(w))
     .slice(0, 6);
 
-  console.log('[KB] Keywords extracted:', words, 'from message:', userMessage.slice(0, 80));
+  // Cache hit es lo común — 1 query DB cada 5 min en vez de 1 por mensaje del bot.
+  const all = await getAllActiveKBCached();
 
-  // If keyword extraction produced results, search by keyword
   if (words.length > 0) {
-    const orConditions = words.flatMap((word) => [
-      { question: { contains: word, mode: 'insensitive' as const } },
-      { answer: { contains: word, mode: 'insensitive' as const } },
-    ]);
-
-    const entries = await prisma.knowledgeBase.findMany({
-      where: {
-        active: true,
-        OR: orConditions,
-      },
-      take: safeMax,
-      orderBy: { sortOrder: 'asc' },
-      select: {
-        category: true,
-        question: true,
-        answer: true,
-      },
+    const matched = all.filter((entry) => {
+      const haystack = `${entry.question} ${entry.answer}`.toLowerCase();
+      return words.some((w) => haystack.includes(w));
     });
-
-    console.log('[KB] Keyword match found:', entries.length, 'entries');
-    if (entries.length > 0) {
-      return entries;
+    console.log('[KB] Keyword match found:', matched.length, 'entries (from cache,', all.length, 'total)');
+    if (matched.length > 0) {
+      return matched.slice(0, safeMax);
     }
   }
 
-  // Fallback: return top entries by sortOrder so the bot always has some KB context
-  console.warn('[KB] Fallback to top entries — no keyword match for:', words);
-  return prisma.knowledgeBase.findMany({
-    where: { active: true },
-    take: safeMax,
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
-    select: {
-      category: true,
-      question: true,
-      answer: true,
-    },
-  });
+  // Decisión consciente (prompt-engineer audit): si no hay match, NO devolver
+  // top entries arbitrarias — contamina el prompt con FAQs irrelevantes que
+  // inducen respuestas off-topic. Mejor que el bot diga "no tengo esa info"
+  // a que invente desde una FAQ random.
+  console.warn('[KB] No keyword match for:', words, '— returning empty');
+  return [];
 }

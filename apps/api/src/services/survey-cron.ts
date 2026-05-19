@@ -3,6 +3,7 @@ import { prisma } from '@ips/db';
 import { sendTextMessage } from './messaging.service';
 import { logger } from '../utils/logger';
 import { maskPhone, firstName } from '../utils/pii';
+import { toMetaSendablePhone } from '../utils/phone';
 
 let task: cron.ScheduledTask | null = null;
 let running = false;
@@ -56,14 +57,7 @@ export function startSurveyCron(): void {
 
       for (const survey of pendingSurveys) {
         if (!survey.patient.phone) continue;
-
-        // Normalize phone for Argentina (LESSONS #40)
-        let sendPhone = survey.patient.phone.startsWith('+')
-          ? survey.patient.phone.slice(1)
-          : survey.patient.phone;
-        if (sendPhone.startsWith('549') && sendPhone.length === 13) {
-          sendPhone = '54' + sendPhone.slice(3);
-        }
+        const sendPhone = toMetaSendablePhone(survey.patient.phone);
 
         const greetName = firstName(survey.patient.fullName);
         const programName = survey.patientProgram.program.name;

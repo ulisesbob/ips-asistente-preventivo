@@ -28,7 +28,28 @@ const server = app.listen(PORT, () => {
   startMedicationCron();
   startSurveyCron();
   startSelfReminderCron();
+
+  // Warm-up post-listen: pegarle a la DB (despierta Neon serverless ~3-5s) y
+  // cargar la KB en cache. Sin esto el primer paciente del día espera 5s al
+  // recibir respuesta del bot (Render duerme + Neon cold start).
+  // Fire-and-forget: si falla, el server arranca igual y se recupera al primer request.
+  warmUp().catch((err) => {
+    logger.warn('Warm-up failed (server still healthy)', {
+      event: 'warmup',
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 });
+
+async function warmUp(): Promise<void> {
+  const start = Date.now();
+  // Ping DB para despertar Neon
+  await prisma.$queryRaw`SELECT 1`;
+  // Cargar KB en cache (1 query DB, evita el round-trip en el primer mensaje del bot)
+  const { getRelevantKBForBot } = await import('./services/knowledge.service');
+  await getRelevantKBForBot('warmup');
+  logger.info(`Warm-up complete in ${Date.now() - start}ms`, { event: 'warmup' });
+}
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
 

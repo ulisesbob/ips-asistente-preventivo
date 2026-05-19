@@ -31,6 +31,10 @@ const envSchema = z.object({
 
   // Optional — Cron
   REMINDER_CRON: z.string().optional(),
+
+  // IPS contacto — default al 0800 oficial. Override por env para reutilizar
+  // el código en otras provincias / otros clientes sin tocar texto hardcoded.
+  IPS_SUPPORT_PHONE: z.string().default('0800-888-0109'),
 });
 
 const parsed = envSchema.safeParse(process.env);

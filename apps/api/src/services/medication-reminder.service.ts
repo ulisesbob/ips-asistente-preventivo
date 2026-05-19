@@ -2,6 +2,7 @@ import { prisma, Role } from '@ips/db';
 import { NotFoundError, ValidationError } from '../utils/errors';
 import { sendTextMessage } from './messaging.service';
 import { maskPhone, firstName } from '../utils/pii';
+import { toMetaSendablePhone } from '../utils/phone';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -250,12 +251,7 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
 
   for (const r of reminders) {
     if (!r.patient.phone) continue;
-
-    // Normalize phone: remove + and apply Argentina fix (LESSONS #40)
-    let sendPhone = r.patient.phone.startsWith('+') ? r.patient.phone.slice(1) : r.patient.phone;
-    if (sendPhone.startsWith('549') && sendPhone.length === 13) {
-      sendPhone = '54' + sendPhone.slice(3);
-    }
+    const sendPhone = toMetaSendablePhone(r.patient.phone);
 
     const message =
       `Hola ${firstName(r.patient.fullName)}! Te recuerdo que es hora de tomar tu medicación:\n\n` +

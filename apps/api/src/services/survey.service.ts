@@ -1,4 +1,5 @@
 import { prisma, Role } from '@ips/db';
+import { config } from '../config/env';
 
 // ─── Pure parser (exported for testing) ──────────────────────────────────────
 
@@ -118,7 +119,7 @@ export async function processSurveyResponse(
         where: { id: pending.id },
         data: { attended: false, completedAt: new Date() },
       });
-      return 'Lamentamos que no hayas podido asistir. Si necesitás reprogramar tu control, comuníquese al 0800-888-0109.';
+      return `Lamentamos que no hayas podido asistir. Si necesitás reprogramar tu control, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
     }
     return null; // not a survey response
   }

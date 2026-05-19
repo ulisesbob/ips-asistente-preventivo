@@ -82,20 +82,8 @@ export function parseWebhookPayload(body: WebhookPayload): IncomingMessage[] {
   return messages;
 }
 
-// ─── Normalize Argentine Phone Numbers ──────────────────────────────────────
-// WhatsApp webhooks send Argentine mobile numbers as 549XXXXXXXXXX (with 9),
-// but the Cloud API expects 54XXXXXXXXXX (without 9) when sending messages.
-// This is a known Meta inconsistency for Argentina (country code 54).
-
-function normalizePhoneForSend(phone: string): string {
-  // Strip + prefix if present (DB stores with +, Meta API expects without)
-  let p = phone.startsWith('+') ? phone.slice(1) : phone;
-  // Argentine mobile: 549 + 10 digits → 54 + 10 digits (LESSONS #40)
-  if (p.startsWith('549') && p.length === 13) {
-    return '54' + p.slice(3);
-  }
-  return p;
-}
+// Phone normalization centralizada en utils/phone.ts.
+import { toMetaSendablePhone } from '../utils/phone';
 
 // ─── Send Text Message ────────────────────────────────────────────────────────
 
@@ -108,7 +96,7 @@ export async function sendTextMessage(to: string, text: string): Promise<boolean
     return false;
   }
 
-  const normalizedTo = normalizePhoneForSend(to);
+  const normalizedTo = toMetaSendablePhone(to);
   const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`;
 
   try {

@@ -4,6 +4,7 @@ import {
   MessageRole,
   RegisteredVia,
   PatientProgramStatus,
+  Role,
 } from '@ips/db';
 import { sendTextMessage } from './messaging.service';
 import { generateResponse, buildSystemPrompt, ChatMessage } from './ai.service';
@@ -22,6 +23,7 @@ import {
   formatRemindersForWhatsApp,
 } from './self-reminder.service';
 import { maskId, maskPhone, firstName } from '../utils/pii';
+import { config } from '../config/env';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -57,15 +59,8 @@ const REMINDER_KEYWORDS = [
 ];
 // Note: "recordatorio" alone is NOT here — "ya tengo un recordatorio" must NOT trigger the flow
 
-// Shared phone normalization for Argentina (LESSONS #40)
-function toSendablePhone(phone: string): string {
-  let p = phone.startsWith('+') ? phone.slice(1) : phone;
-  // Argentina: 549 → 54 (Meta sends 549 but expects 54 for sending)
-  if (p.startsWith('549') && p.length === 13) {
-    p = '54' + p.slice(3);
-  }
-  return p;
-}
+// Phone normalization centralizada en utils/phone.ts (LESSONS #40).
+import { toMetaSendablePhone as toSendablePhone } from '../utils/phone';
 
 // PII masking centralized in utils/pii.ts (see audit #24).
 
@@ -402,7 +397,7 @@ async function handleRegistration(
         registrationState.delete(phone);
         const rejection =
           'Tu DNI ya está asociado a otro número de WhatsApp. ' +
-          'Para modificar tu número, comuníquese al 0800-888-0109.';
+          `Para modificar tu número, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
         await sendTextMessage(toSendablePhone(phone), rejection);
         return;
       }
@@ -451,13 +446,13 @@ async function handleRegistration(
         `Listo, ${patientName}! Te encontré en nuestro sistema. ` +
         `Estás inscripto/a en: ${programNames.join(', ')}.\n\n` +
         `¿En qué puedo ayudarte?\n\n` +
-        `Esta información es orientativa. Para consultas sobre su caso, comuníquese al 0800-888-0109.`;
+        `Esta información es orientativa. Para consultas sobre su caso, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
     } else {
       welcome =
         `Listo, ${patientName}! Ya quedaste registrado/a en el sistema. ` +
         `Un médico completará tu información y podrá inscribirte en los programas que correspondan.\n\n` +
         `¿Tenés alguna consulta general?\n\n` +
-        `Esta información es orientativa. Para consultas sobre su caso, comuníquese al 0800-888-0109.`;
+        `Esta información es orientativa. Para consultas sobre su caso, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
     }
 
     await saveMessages(e164Phone, patientId, text, welcome);
@@ -654,7 +649,7 @@ async function handleChat(
     console.error('[AI] Error generando respuesta:', error);
     aiResponse =
       'Disculpá, estoy teniendo un problema técnico. ' +
-      'Para consultas, comuníquese al 0800-888-0109.';
+      `Para consultas, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
   }
 
   // Server-side defense: check if AI leaked note content (C1 security fix)
@@ -674,7 +669,7 @@ async function handleChat(
       aiResponse =
         'No tengo acceso a esa información. ' +
         '¿Hay algo más en lo que pueda ayudarte?\n\n' +
-        'Esta información es orientativa. Para consultas sobre su caso, comuníquese al 0800-888-0109.';
+        `Esta información es orientativa. Para consultas sobre su caso, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
     }
   }
 
@@ -727,7 +722,7 @@ async function handleBaja(
 
   const message =
     'Tu solicitud de baja fue procesada. No recibirás más recordatorios del IPS. ' +
-    'Si querés volver a activarlos, escribí "ALTA" o comuníquese al 0800-888-0109.';
+    `Si querés volver a activarlos, escribí "ALTA" o comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
 
   const conversation = await getOrCreateConversation(e164Phone, patientId);
   await saveMessagePair(conversation.id, 'BAJA', message);
@@ -774,10 +769,79 @@ async function handleEscalation(
   const message =
     'Entendido, voy a derivar tu consulta a un operador del IPS. ' +
     'Te van a responder por este mismo chat. ' +
-    'Si es urgente, también podés llamar al 0800-888-0109.';
+    `Si es urgente, también podés llamar al ${config.IPS_SUPPORT_PHONE}.`;
 
   await saveMessagePair(conversation.id, text, message);
   await sendTextMessage(toSendablePhone(phone), message);
+}
+
+// ─── Access control helper (audit IDOR fix) ──────────────────────────────────
+// Antes: cualquier DOCTOR autenticado podia responder/cerrar conversaciones de
+// pacientes de OTROS programas. Ahora se verifica que el doctor pertenezca a
+// al menos uno de los programas del paciente vinculado a la conversacion.
+
+async function verifyConversationAccess(
+  conversationId: string,
+  doctorId: string,
+  role: Role
+): Promise<{ id: string; phone: string; status: ConversationStatus; patientId: string | null }> {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: {
+      id: true,
+      phone: true,
+      status: true,
+      patientId: true,
+      patient: {
+        select: {
+          programs: {
+            select: { programId: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!conversation) {
+    throw new Error('Conversación no encontrada');
+  }
+
+  // ADMIN ve todo, no requiere chequeo de programas
+  if (role === Role.ADMIN) {
+    return {
+      id: conversation.id,
+      phone: conversation.phone,
+      status: conversation.status,
+      patientId: conversation.patientId,
+    };
+  }
+
+  // DOCTOR debe tener acceso via doctor_programs ↔ patient_programs
+  if (!conversation.patient) {
+    // Conversación sin paciente vinculado — solo ADMIN.
+    throw new Error('Conversación no encontrada');
+  }
+
+  const doctorPrograms = await prisma.doctorProgram.findMany({
+    where: { doctorId },
+    select: { programId: true },
+  });
+  const doctorProgramIds = new Set(doctorPrograms.map((dp) => dp.programId));
+  const hasAccess = conversation.patient.programs.some((p) =>
+    doctorProgramIds.has(p.programId)
+  );
+
+  if (!hasAccess) {
+    // Mismo mensaje que "no encontrada" para no filtrar la existencia.
+    throw new Error('Conversación no encontrada');
+  }
+
+  return {
+    id: conversation.id,
+    phone: conversation.phone,
+    status: conversation.status,
+    patientId: conversation.patientId,
+  };
 }
 
 // ─── Reply from Panel (operator) ─────────────────────────────────────────────
@@ -785,16 +849,10 @@ async function handleEscalation(
 export async function sendOperatorReply(
   conversationId: string,
   replyText: string,
-  doctorId: string
+  doctorId: string,
+  role: Role
 ): Promise<void> {
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
-    select: { id: true, phone: true, status: true },
-  });
-
-  if (!conversation) {
-    throw new Error('Conversación no encontrada');
-  }
+  const conversation = await verifyConversationAccess(conversationId, doctorId, role);
 
   if (conversation.status !== ConversationStatus.ESCALATED) {
     throw new Error('Solo se puede responder a conversaciones escaladas');
@@ -815,15 +873,12 @@ export async function sendOperatorReply(
 
 // ─── Close escalated conversation ────────────────────────────────────────────
 
-export async function closeEscalatedConversation(conversationId: string): Promise<void> {
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
-    select: { id: true, status: true },
-  });
-
-  if (!conversation) {
-    throw new Error('Conversación no encontrada');
-  }
+export async function closeEscalatedConversation(
+  conversationId: string,
+  doctorId: string,
+  role: Role
+): Promise<void> {
+  const conversation = await verifyConversationAccess(conversationId, doctorId, role);
 
   if (conversation.status !== ConversationStatus.ESCALATED) {
     throw new Error('Solo se puede cerrar conversaciones escaladas');

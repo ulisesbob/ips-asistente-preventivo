@@ -1,6 +1,7 @@
 import { prisma, SelfReminderStatus } from '@ips/db';
 import { sendTextMessage } from './messaging.service';
 import { maskPhone, firstName } from '../utils/pii';
+import { toMetaSendablePhone } from '../utils/phone';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -255,12 +256,7 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
 
   for (const r of reminders) {
     if (!r.patient.phone) continue;
-
-    // Normalize phone (LESSONS #40)
-    let sendPhone = r.patient.phone.startsWith('+') ? r.patient.phone.slice(1) : r.patient.phone;
-    if (sendPhone.startsWith('549') && sendPhone.length === 13) {
-      sendPhone = '54' + sendPhone.slice(3);
-    }
+    const sendPhone = toMetaSendablePhone(r.patient.phone);
 
     // Usar helper centralizado en utils/pii.ts (maneja trim, multiples espacios,
     // tabs, etc. — antes el inline split(' ')[0] daba "(no name)" con leading whitespace).
