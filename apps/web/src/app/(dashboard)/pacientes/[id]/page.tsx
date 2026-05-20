@@ -25,6 +25,8 @@ import {
   Pencil,
   Pill,
   Trash2,
+  UserPlus,
+  AlertCircle,
 } from 'lucide-react';
 
 interface PatientDetail {
@@ -37,6 +39,8 @@ interface PatientDetail {
   consent: boolean;
   registeredVia: string;
   whatsappLinked: boolean;
+  lastNoProgramReminderAt: string | null;
+  noProgramReminderCount: number;
   createdAt: string;
   programs: PatientProgram[];
   reminders: Reminder[];
@@ -572,6 +576,42 @@ export default function PatientDetailPage() {
         </div>
       )}
 
+      {/* Followup status — paciente registrado por bot, sin programa */}
+      {patient.programs.length === 0 && patient.noProgramReminderCount > 0 && (
+        <div className={`rounded-lg border p-4 ${
+          patient.noProgramReminderCount >= 3
+            ? 'bg-rose-50 border-rose-200'
+            : 'bg-sky-50 border-sky-200'
+        }`}>
+          <div className="flex items-start gap-3">
+            {patient.noProgramReminderCount >= 3 ? (
+              <AlertCircle className="w-4 h-4 text-rose-600 mt-0.5 shrink-0" />
+            ) : (
+              <UserPlus className="w-4 h-4 text-sky-600 mt-0.5 shrink-0" />
+            )}
+            <div className="flex-1 text-sm">
+              <p className={`font-medium ${
+                patient.noProgramReminderCount >= 3 ? 'text-rose-800' : 'text-sky-800'
+              }`}>
+                {patient.noProgramReminderCount >= 3
+                  ? 'Sin programa tras 3 recordatorios — requiere acción'
+                  : `Recibiendo seguimiento para inscribirse (${patient.noProgramReminderCount}/3 avisos enviados)`}
+              </p>
+              <p className={`text-xs mt-1 ${
+                patient.noProgramReminderCount >= 3 ? 'text-rose-700' : 'text-sky-700'
+              }`}>
+                {patient.noProgramReminderCount >= 3
+                  ? 'Ya recibió los 3 recordatorios automáticos para acercarse al Área de Programas Especiales y no se inscribió en ninguno. Inscribilo manualmente o contactalo.'
+                  : 'El sistema le está pidiendo automáticamente que se acerque al Área de Programas Especiales con DNI y carnet del IPS.'}
+                {patient.lastNoProgramReminderAt && (
+                  <> Último aviso: {formatDateTime(patient.lastNoProgramReminderAt)}.</>
+                )}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Programs */}
       <div className="bg-white rounded-lg border border-border">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
@@ -939,9 +979,11 @@ export default function PatientDetailPage() {
                 <span className={`text-xs px-2 py-0.5 rounded border ${
                   conv.status === 'OPEN'
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : conv.status === 'ESCALATED'
+                    ? 'bg-orange-50 text-orange-700 border-orange-200'
                     : 'bg-slate-50 text-slate-600 border-slate-200'
                 }`}>
-                  {conv.status === 'OPEN' ? 'Abierta' : 'Cerrada'}
+                  {conv.status === 'OPEN' ? 'Abierta' : conv.status === 'ESCALATED' ? 'Escalada' : 'Cerrada'}
                 </span>
               </div>
             ))}
