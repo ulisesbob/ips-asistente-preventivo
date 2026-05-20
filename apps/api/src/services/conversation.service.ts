@@ -9,6 +9,7 @@ import {
 } from '@ips/db';
 import { sendTextMessage } from './messaging.service';
 import { generateResponse, buildSystemPrompt, ChatMessage, MAX_HISTORY_MESSAGES } from './ai.service';
+import { responseLeaksNotes } from '../utils/note-leak';
 import { getLatestNotesForBot } from './note.service';
 import { getRelevantKBForBot } from './knowledge.service';
 import { processSurveyResponse } from './survey.service';
@@ -686,18 +687,10 @@ async function handleChat(
       `Para consultas, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
   }
 
-  // Server-side defense: check if AI leaked note content (C1 security fix)
+  // Server-side defense: el bot NUNCA debe filtrar notas operativas (audit #5).
+  // Detección normalizada por acentos/puntuación/espacios (ver utils/note-leak).
   if (notes.length > 0) {
-    const leaked = notes.some((n) => {
-      const words = n.content.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
-      // Check if 3+ consecutive words from a note appear in the response
-      const responseLower = aiResponse.toLowerCase();
-      for (let i = 0; i <= words.length - 3; i++) {
-        const fragment = words.slice(i, i + 3).join(' ');
-        if (responseLower.includes(fragment)) return true;
-      }
-      return false;
-    });
+    const leaked = responseLeaksNotes(aiResponse, notes.map((n) => n.content));
     if (leaked) {
       console.warn(`[Security] AI response may contain leaked note content for patient ${maskId(patient.id)}. Replacing.`);
       aiResponse =
