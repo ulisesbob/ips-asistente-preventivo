@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import * as Sentry from '@sentry/node';
 import { config } from '../config/env';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -475,6 +476,12 @@ async function _generateResponse(
       // caemos a Haiku igual. Antes solo se caía en 'overloaded' y el resto
       // devolvía "problema técnico" aunque Haiku podría haber respondido (audit #28).
       console.warn(`[AI] Sonnet falló (${errorMessage(err)}), usando fallback Haiku`);
+      // Visibilidad: el paciente recibe respuesta igual (resiliencia #28), pero
+      // necesitamos enterarnos de que Sonnet está fallando.
+      Sentry.captureException(err, {
+        level: 'warning',
+        tags: { area: 'ai', ai_model: 'sonnet', ai_stage: 'primary' },
+      });
       break;
     }
   }
@@ -486,6 +493,12 @@ async function _generateResponse(
     if (response) return response;
   } catch (err) {
     console.error('[AI] Haiku fallback also failed:', err);
+    // Incidente real: ni Sonnet ni Haiku respondieron, el paciente recibe el
+    // mensaje genérico. Esto SÍ hay que verlo en Sentry.
+    Sentry.captureException(err, {
+      level: 'error',
+      tags: { area: 'ai', ai_model: 'haiku', ai_stage: 'fallback' },
+    });
   }
 
   return 'Disculpá, estamos teniendo un problema técnico. Intentá de nuevo en unos minutos.';

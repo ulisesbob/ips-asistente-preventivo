@@ -1,5 +1,6 @@
 // app.ts — Express app setup without server start (importable in tests)
 import express from 'express';
+import * as Sentry from '@sentry/node';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -120,6 +121,14 @@ app.use(auditContextMiddleware);
 // ─── API Routes ───────────────────────────────────────────────────────────────
 
 app.use(router);
+
+// ─── Captura de errores en Sentry ────────────────────────────────────────────
+// Va DESPUÉS de las rutas y ANTES del handler que formatea la respuesta. Captura
+// los 5xx con contexto del request (sin PII, ver instrument.ts) y hace next(err).
+// Solo si hay DSN configurado (en tests/dev sin DSN no se monta).
+if (config.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // ─── Global Error Handler (must be last) ─────────────────────────────────────
 

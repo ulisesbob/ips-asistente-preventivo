@@ -1,3 +1,5 @@
+// Sentry primero: la instrumentación debe engancharse antes de cargar express.
+import './instrument';
 // Must be imported first to validate env vars before anything else
 import './config/env';
 

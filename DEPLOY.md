@@ -27,6 +27,7 @@
 | `WHATSAPP_VERIFY_TOKEN` | Para bot | String custom |
 | `WHATSAPP_APP_SECRET` | Para bot | Secret de Meta |
 | `ANTHROPIC_API_KEY` | Para AI | `sk-ant-...` |
+| `SENTRY_DSN` | No (recomendado) | `https://...@o...ingest.sentry.io/...` |
 | `REMINDER_CRON` | No (default 8AM AR) | `0 8 * * *` |
 
 #### Vercel (Web)
