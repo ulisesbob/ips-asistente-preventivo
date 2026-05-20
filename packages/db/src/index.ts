@@ -32,4 +32,10 @@ export {
   setAuditActor,
 } from './audit-context';
 export type { AuditActor, ActorTypeValue } from './audit-context';
-export { AUDITED_MODELS } from './audit-extension';
+export {
+  AUDITED_MODELS,
+  shouldAudit,
+  auditActionFor,
+  extractRecordId,
+  extractChangedFields,
+} from './audit-extension';
