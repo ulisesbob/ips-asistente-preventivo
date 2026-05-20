@@ -1,0 +1,11 @@
+-- Cifrado en reposo de texto clínico (prisma-field-encryption).
+-- PatientNote.content pasa de VARCHAR(500) a TEXT para alojar el ciphertext
+-- (el cifrado AES-GCM + envelope produce un valor más largo que el plaintext).
+-- Message.content ya es TEXT en Postgres, no requiere cambio de tipo.
+--
+-- IMPORTANTE: este cambio NO cifra las filas existentes. Las filas viejas quedan
+-- en texto plano y siguen siendo legibles (la extensión hace passthrough cuando el
+-- valor no tiene el prefijo de cifrado) y se cifran en su próxima escritura.
+-- Para cifrar el histórico ya cargado, correr el backfill:
+--   npx tsx packages/db/src/backfill-encrypt.ts
+ALTER TABLE "patient_notes" ALTER COLUMN "content" SET DATA TYPE TEXT;

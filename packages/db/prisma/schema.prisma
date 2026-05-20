@@ -234,7 +234,8 @@ model Message {
   id             String      @id @default(uuid()) @db.Uuid
   conversationId String      @db.Uuid
   role           MessageRole
-  content        String
+  // Cifrado en reposo (prisma-field-encryption) — texto libre del paciente/bot.
+  content        String      /// @encrypted
   createdAt      DateTime    @default(now()) @db.Timestamptz()
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -247,7 +248,9 @@ model PatientNote {
   id        String   @id @default(uuid()) @db.Uuid
   patientId String   @db.Uuid
   doctorId  String   @db.Uuid
-  content   String   @db.VarChar(500)
+  // Cifrado en reposo (prisma-field-encryption). El ciphertext es más largo que
+  // el plaintext, por eso Text y no VarChar(500). El límite de 500 se valida en Zod.
+  content   String   @db.Text /// @encrypted
   createdAt DateTime @default(now()) @db.Timestamptz()
 
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)

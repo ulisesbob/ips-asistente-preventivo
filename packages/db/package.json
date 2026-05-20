@@ -16,7 +16,8 @@
     "seed": "tsx src/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "^5.20.0"
+    "@prisma/client": "^5.20.0",
+    "prisma-field-encryption": "^1.6.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",

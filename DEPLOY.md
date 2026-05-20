@@ -18,6 +18,7 @@
 |----------|-----------|---------|
 | `DATABASE_URL` | Auto (Railway Postgres) | `postgresql://...` |
 | `JWT_SECRET` | Si | 64+ chars |
+| `PRISMA_FIELD_ENCRYPTION_KEY` | **Si** | `k1.aesgcm256.<base64>` (`npx cloak generate`) |
 | `NODE_ENV` | Si | `production` |
 | `PORT` | No (default 3001) | `3001` |
 | `FRONTEND_URL` | Si | `https://ips-panel.vercel.app` |
@@ -51,6 +52,41 @@ Después del primer deploy, ejecutar en Render Shell:
 ```bash
 ADMIN_PASSWORD=TuPasswordSeguro123! npm run db:seed:prod
 ```
+
+### Cifrado en reposo (PII clínica) — CRÍTICO
+
+`PatientNote.content` y `Message.content` se cifran en la DB con
+`prisma-field-encryption` (AES-GCM 256). Pasos para activarlo en producción:
+
+1. **Generar la clave de producción** (una sola vez, distinta a la de dev):
+   ```bash
+   npx cloak generate
+   ```
+   Guardar el valor `k1.aesgcm256...` en `PRISMA_FIELD_ENCRYPTION_KEY`
+   (Render → Environment). **NO** commitearla ni reusar la de dev/test.
+
+2. ⚠️ **Si se pierde esta clave, los datos cifrados son IRRECUPERABLES.**
+   Guardar una copia en el gestor de secretos / vault del equipo.
+
+3. **Aplicar la migración** (cambia `patient_notes.content` a TEXT):
+   ```bash
+   npm run db:migrate:deploy
+   ```
+
+4. **Backfill del histórico** (cifra las filas que ya estaban en texto plano).
+   Las filas nuevas se cifran solas; las viejas siguen legibles hasta correr esto:
+   ```bash
+   DRY_RUN=1 npx tsx packages/db/src/backfill-encrypt.ts   # previsualizar
+   npx tsx packages/db/src/backfill-encrypt.ts             # ejecutar (idempotente)
+   ```
+
+5. **Rotación de clave** (a futuro): generar una nueva con `npx cloak generate`,
+   ponerla como nueva `PRISMA_FIELD_ENCRYPTION_KEY` y la vieja en
+   `PRISMA_FIELD_DECRYPTION_KEYS` (CSV), luego re-correr el backfill.
+
+> Pendiente (fase 2): cifrado de `dni`/`phone`. Requiere columnas hash
+> determinísticas (`dniHash`/`phoneHash`) porque son `@unique` y se buscan por
+> valor exacto en el hot path del bot. Hacerlo en ventana de mantenimiento.
 
 ---
 
