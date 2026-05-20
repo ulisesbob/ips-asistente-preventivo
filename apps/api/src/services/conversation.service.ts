@@ -8,7 +8,7 @@ import {
   Role,
 } from '@ips/db';
 import { sendTextMessage } from './messaging.service';
-import { generateResponse, buildSystemPrompt, ChatMessage } from './ai.service';
+import { generateResponse, buildSystemPrompt, ChatMessage, MAX_HISTORY_MESSAGES } from './ai.service';
 import { getLatestNotesForBot } from './note.service';
 import { getRelevantKBForBot } from './knowledge.service';
 import { processSurveyResponse } from './survey.service';
@@ -661,12 +661,13 @@ async function handleChat(
     });
   }
 
-  // Get conversation history — limit to last 6 messages to avoid old prompt contamination
+  // Get conversation history. Usamos el MISMO límite que ai.service (MAX_HISTORY_MESSAGES)
+  // para no truncar más agresivo acá: antes cortaba a 6 y el bot olvidaba el contexto
+  // a mitad de conversación pese a declarar 20 (audit #29), malo para crónicos.
   const conversation = await getOrCreateConversation(e164Phone, patient.id);
   const history = await getConversationHistory(conversation.id);
 
-  // Only use recent history (3 exchanges) to prevent old response patterns from dominating
-  const recentHistory = history.slice(-6);
+  const recentHistory = history.slice(-MAX_HISTORY_MESSAGES);
 
   // Add user message to history for AI
   const messagesForAi: ChatMessage[] = [

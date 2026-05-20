@@ -37,6 +37,9 @@ const envSchema = z.object({
 
   // Optional — AI (Anthropic)
   ANTHROPIC_API_KEY: z.string().optional(),
+  // Override del modelo (para pinear un snapshot con datestamp sin tocar código).
+  ANTHROPIC_MODEL: z.string().optional(),
+  ANTHROPIC_FALLBACK_MODEL: z.string().optional(),
 
   // Optional — Cron
   REMINDER_CRON: z.string().optional(),

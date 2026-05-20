@@ -40,6 +40,71 @@ export interface DashboardStats {
   patientsByProgram: { programName: string; count: number }[];
 }
 
+// ─── Cache in-memory (finding #37) ────────────────────────────────────────────
+//
+// getStats y getAlerts corren ~7+ queries cada una y el panel las re-ejecuta en
+// cada refresh. Con muchos médicos refrescando se generan cientos de queries/s.
+// Cacheamos el resultado por clave durante un TTL corto para colapsar esa carga.
+//
+// LIMITACIONES (es solo optimización, no fuente de verdad):
+//  - Cache POR INSTANCIA del proceso. Si la API corre en varias instancias detrás
+//    de un load balancer, cada una mantiene su propia copia: puede haber hasta
+//    `TTL` ms de inconsistencia entre instancias. Aceptable para un dashboard.
+//  - Se pierde si el proceso reinicia. No pasa nada: el próximo request recalcula.
+//  - No comparte datos entre médicos: la clave incluye role + doctorId, así que
+//    cada médico ve únicamente lo suyo (un DOCTOR nunca lee la entrada de otro).
+
+// TTL corto: 30s es suficiente para que un panel que se refresca seguido pegue
+// al cache la enorme mayoría de las veces, pero los datos nunca quedan más de
+// 30s desactualizados (overdue/alertas se mueven en escala de días, no segundos).
+const CACHE_TTL_MS = 30_000;
+
+interface CacheEntry<T> {
+  value: T;
+  expiresAt: number; // epoch ms
+}
+
+// Un store por tipo de resultado para no mezclar shapes. Las claves se construyen
+// con cacheKey() incluyendo TODOS los parámetros que cambian el resultado.
+const statsCache = new Map<string, CacheEntry<DashboardStats>>();
+const alertsCache = new Map<string, CacheEntry<DashboardAlerts>>();
+
+// La clave incluye role + doctorId porque son los únicos params que alteran el
+// resultado (programId/programFilter se derivan de doctorId vía doctorProgram).
+// Para ADMIN el doctorId no afecta el resultado, pero incluirlo igual es seguro.
+function cacheKey(doctorId: string, role: Role): string {
+  return `${role}:${doctorId}`;
+}
+
+// Devuelve el valor cacheado si sigue vigente; si expiró lo elimina y devuelve null.
+function cacheGet<T>(store: Map<string, CacheEntry<T>>, key: string): T | null {
+  const entry = store.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    store.delete(key); // limpieza perezosa al leer una entrada vencida
+    return null;
+  }
+  return entry.value;
+}
+
+function cacheSet<T>(store: Map<string, CacheEntry<T>>, key: string, value: T): void {
+  store.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+
+// Invalidación manual: llamar tras una mutación que afecte el dashboard
+// (inscribir/dar de baja pacientes, cambio de consentimiento, etc.).
+// Sin argumentos limpia todo; con doctorId/role limpia solo esa entrada.
+export function invalidateDashboardCache(doctorId?: string, role?: Role): void {
+  if (doctorId !== undefined && role !== undefined) {
+    const key = cacheKey(doctorId, role);
+    statsCache.delete(key);
+    alertsCache.delete(key);
+    return;
+  }
+  statsCache.clear();
+  alertsCache.clear();
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function startOfTodayUTC(): Date {
@@ -55,6 +120,17 @@ function daysAgoUTC(days: number): Date {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 export async function getStats(doctorId: string, role: Role): Promise<DashboardStats> {
+  // Cache hit corto: evita re-correr ~7 queries en cada refresh del panel.
+  const key = cacheKey(doctorId, role);
+  const cached = cacheGet(statsCache, key);
+  if (cached) return cached;
+
+  const result = await computeStats(doctorId, role);
+  cacheSet(statsCache, key, result);
+  return result;
+}
+
+async function computeStats(doctorId: string, role: Role): Promise<DashboardStats> {
   const isAdmin = role === Role.ADMIN;
 
   // For DOCTOR role, get their assigned program IDs
@@ -165,6 +241,18 @@ const OVERDUE_CRITICAL_DAYS = 60;
 const NO_RESPONSE_THRESHOLD = 3;
 
 export async function getAlerts(doctorId: string, role: Role): Promise<DashboardAlerts> {
+  // Cache hit corto: getAlerts corre varias queries pesadas (overdue split,
+  // no-response groupBy, opted-out, followups). El panel la re-pega en cada refresh.
+  const key = cacheKey(doctorId, role);
+  const cached = cacheGet(alertsCache, key);
+  if (cached) return cached;
+
+  const result = await computeAlerts(doctorId, role);
+  cacheSet(alertsCache, key, result);
+  return result;
+}
+
+async function computeAlerts(doctorId: string, role: Role): Promise<DashboardAlerts> {
   const isAdmin = role === Role.ADMIN;
 
   // For DOCTOR, restrict to their programs

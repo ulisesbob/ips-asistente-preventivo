@@ -10,6 +10,9 @@ export interface TokenPayload {
   sub: string;
   email: string;
   role: Role;
+  // Versión de sesión: si no coincide con doctor.tokenVersion, el token fue
+  // revocado (logout / cambio de password). Ver requireAuth y logout (audit #4).
+  tv: number;
 }
 
 export interface AuthTokens {
@@ -58,6 +61,7 @@ export async function login(email: string, password: string): Promise<LoginResul
       email: true,
       role: true,
       passwordHash: true,
+      tokenVersion: true,
     },
   });
 
@@ -73,6 +77,7 @@ export async function login(email: string, password: string): Promise<LoginResul
     sub: doctor.id,
     email: doctor.email,
     role: doctor.role,
+    tv: doctor.tokenVersion ?? 0,
   };
 
   const accessToken = generateAccessToken(payload);
@@ -110,20 +115,54 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
   // Verify doctor still exists
   const doctor = await prisma.doctor.findUnique({
     where: { id: payload.sub },
-    select: { id: true, email: true, role: true },
+    select: { id: true, email: true, role: true, tokenVersion: true },
   });
 
   if (!doctor) {
     throw new UnauthorizedError('Usuario no encontrado');
   }
 
+  // Revocación: si la versión del refresh token no coincide con la del doctor,
+  // fue invalidado por un logout (o cambio de password). Audit #4.
+  if ((payload.tv ?? 0) !== (doctor.tokenVersion ?? 0)) {
+    throw new UnauthorizedError('Sesión expirada, iniciá sesión de nuevo');
+  }
+
   const newPayload: TokenPayload = {
     sub: doctor.id,
     email: doctor.email,
     role: doctor.role,
+    tv: doctor.tokenVersion ?? 0,
   };
 
   return generateAccessToken(newPayload);
+}
+
+/**
+ * Cierra TODAS las sesiones del médico incrementando su tokenVersion: invalida de
+ * inmediato cualquier access/refresh token emitido antes (audit #4). Recibe el
+ * refresh token de la cookie; si falta o es inválido, es un no-op silencioso
+ * (el logout siempre debe "funcionar" desde la perspectiva del cliente).
+ */
+export async function logout(refreshToken: string | undefined): Promise<void> {
+  if (!refreshToken) return;
+
+  let sub: string;
+  try {
+    const decoded = jwt.verify(refreshToken, config.JWT_SECRET, {
+      algorithms: ['HS256'],
+    }) as TokenPayload & { type?: string };
+    if (decoded.type !== 'refresh') return;
+    sub = decoded.sub;
+  } catch {
+    return; // token inválido/expirado: no hay sesión que revocar
+  }
+
+  await prisma.doctor
+    .update({ where: { id: sub }, data: { tokenVersion: { increment: 1 } } })
+    .catch(() => {
+      /* doctor borrado entre medio: no-op */
+    });
 }
 
 export async function getMe(doctorId: string): Promise<DoctorProfile> {

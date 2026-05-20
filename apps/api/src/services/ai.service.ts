@@ -272,7 +272,9 @@ ${kbInfo}`,
 
 // ─── Generate AI Response ─────────────────────────────────────────────────────
 
-const MAX_HISTORY_MESSAGES = 20;
+// Exportado para que conversation.service use el MISMO límite y no haya un
+// truncado más agresivo aguas arriba (audit #29: cortaba a 6 y el bot olvidaba).
+export const MAX_HISTORY_MESSAGES = 20;
 const MAX_CONCURRENT_AI_CALLS = 50; // Limit concurrent Claude API calls
 // Audit perf #4: antes la queue era unbounded y sin timeout. Si Anthropic se
 // traba 30s, cada nuevo webhook se cuelga; Meta reenvía a los 20s, queue dobla,
@@ -369,8 +371,11 @@ export async function generateResponse(
   }
 }
 
-const PRIMARY_MODEL = 'claude-sonnet-4-6';
-const FALLBACK_MODEL = 'claude-haiku-4-5-20251001';
+// Modelos configurables por env: permite pinear un snapshot con datestamp
+// (ej. "claude-sonnet-4-6-YYYYMMDD") sin tocar código, por si Anthropic deprecara
+// el alias y el bot degradara en silencio (audit #27). Default = alias estable.
+const PRIMARY_MODEL = config.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
+const FALLBACK_MODEL = config.ANTHROPIC_FALLBACK_MODEL || 'claude-haiku-4-5-20251001';
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 2000;
 
@@ -408,6 +413,39 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Error transitorio donde reintentar/caer a Haiku tiene sentido: sobrecarga,
+ * rate limit, 5xx, timeout o falla de red. Los 4xx de cliente (400/401/403)
+ * NO son transitorios (reintentar no ayuda), pero igual el caller cae a Haiku.
+ */
+function isTransientError(err: unknown): boolean {
+  const status =
+    (err as { status?: number })?.status ?? (err as { statusCode?: number })?.statusCode;
+  if (typeof status === 'number') {
+    if (status === 429) return true; // rate limit
+    return status >= 500 && status <= 599; // 500/502/503/504/529
+  }
+  // Sin status (errores de red / SDK): heurística por mensaje.
+  const m = errorMessage(err).toLowerCase();
+  return (
+    m.includes('overloaded') ||
+    m.includes('529') ||
+    m.includes('timeout') ||
+    m.includes('timed out') ||
+    m.includes('econnreset') ||
+    m.includes('etimedout') ||
+    m.includes('enotfound') ||
+    m.includes('econnrefused') ||
+    m.includes('network') ||
+    m.includes('fetch failed') ||
+    m.includes('connection error')
+  );
+}
+
 async function _generateResponse(
   systemBlocks: SystemBlock[],
   history: ChatMessage[]
@@ -421,27 +459,23 @@ async function _generateResponse(
     try {
       const response = await callClaude(anthropic, PRIMARY_MODEL, systemBlocks, messages);
       if (response) return response;
+      break; // respuesta vacía → intentar Haiku
     } catch (err: unknown) {
-      const isOverloaded = err instanceof Error && (
-        err.message.includes('Overloaded') ||
-        err.message.includes('overloaded') ||
-        err.message.includes('529')
-      );
-
-      if (isOverloaded && attempt < MAX_RETRIES) {
-        console.warn(`[AI] Sonnet overloaded (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${RETRY_DELAY_MS}ms...`);
+      // Reintentar solo errores transitorios (sobrecarga, 5xx, timeout, red).
+      if (isTransientError(err) && attempt < MAX_RETRIES) {
+        console.warn(
+          `[AI] Sonnet error transitorio (intento ${attempt + 1}/${MAX_RETRIES + 1}), ` +
+          `reintento en ${RETRY_DELAY_MS}ms: ${errorMessage(err)}`
+        );
         await delay(RETRY_DELAY_MS);
         continue;
       }
 
-      // Last Sonnet attempt failed — fall through to Haiku
-      if (isOverloaded) {
-        console.warn('[AI] Sonnet overloaded after retries, falling back to Haiku');
-        break;
-      }
-
-      // Non-overload error — rethrow
-      throw err;
+      // Cualquier otro fallo de Sonnet (transitorio agotado, o no-transitorio):
+      // caemos a Haiku igual. Antes solo se caía en 'overloaded' y el resto
+      // devolvía "problema técnico" aunque Haiku podría haber respondido (audit #28).
+      console.warn(`[AI] Sonnet falló (${errorMessage(err)}), usando fallback Haiku`);
+      break;
     }
   }
 

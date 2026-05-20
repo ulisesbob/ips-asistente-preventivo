@@ -87,6 +87,9 @@ model Doctor {
   email        String   @unique
   passwordHash String
   role         Role     @default(DOCTOR)
+  // Revocación de sesiones: incrementar este valor invalida TODOS los JWT
+  // (access + refresh) emitidos antes — logout / cambio de password (audit #4).
+  tokenVersion Int      @default(0)
   createdAt    DateTime @default(now()) @db.Timestamptz()
 
   programs              DoctorProgram[]
@@ -225,7 +228,9 @@ model Conversation {
   messages Message[]
 
   @@index([patientId])
-  @@index([phone])
+  // Compuesto: getOrCreateConversation busca por (phone, status=OPEN). El índice
+  // compuesto cubre también las búsquedas solo-por-phone (prefijo) (audit #42).
+  @@index([phone, status])
   @@index([status])
   @@map("conversations")
 }

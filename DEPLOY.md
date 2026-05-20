@@ -90,6 +90,27 @@ ADMIN_PASSWORD=TuPasswordSeguro123! npm run db:seed:prod
 
 ---
 
+## 1b. Conexiones a la DB — Neon Pooler (escalabilidad)
+
+A concurrencia alta (muchos mensajes/seg simultáneos), las conexiones **directas**
+a Neon serverless se agotan y la DB rechaza conexiones (audit #34). Para producción:
+
+1. **`DATABASE_URL` → endpoint pooler de Neon** (host con `-pooler`):
+   ```
+   postgresql://USER:PASS@ep-xxx-pooler.region.aws.neon.tech/ips?sslmode=require&pgbouncer=true&connection_limit=20
+   ```
+   El `-pooler` activa PgBouncer (transaction mode); `connection_limit` topea el pool.
+
+2. **Migraciones a través del endpoint directo** (PgBouncer no soporta el protocolo
+   de migración). Cuando se active el pooler, agregar `directUrl` al `datasource` del
+   `schema.prisma` apuntando a `DIRECT_DATABASE_URL` (endpoint sin `-pooler`) y correr
+   `npm run db:migrate:deploy` contra ese. Hasta entonces, migrar con la URL directa.
+
+> Estado: pendiente de activar en el dashboard de Neon. El código funciona con
+> conexión directa; este cambio es para sostener carga concurrente.
+
+---
+
 ## 2. Deploy Panel en Vercel
 
 1. Importar repo en Vercel

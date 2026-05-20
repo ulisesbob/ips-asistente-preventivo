@@ -111,7 +111,12 @@ router.get(
 
 router.post(
   '/logout',
-  (_req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
+    // Revoca TODAS las sesiones del médico (bump de tokenVersion) usando el
+    // refresh token de la cookie — así un token robado deja de servir (audit #4).
+    const token = (req.cookies as Record<string, string | undefined>)['refreshToken'];
+    await authService.logout(token);
+
     const isProduction = config.NODE_ENV === 'production';
     res.clearCookie('refreshToken', {
       httpOnly: true,
@@ -124,7 +129,7 @@ router.post(
       status: 'ok',
       message: 'Sesión cerrada',
     });
-  }
+  })
 );
 
 export { router as authRouter };
