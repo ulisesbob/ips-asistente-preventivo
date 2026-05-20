@@ -1,4 +1,4 @@
-import { prisma, Role, RegisteredVia, Gender, PatientProgramStatus, Prisma } from '@ips/db';
+import { prisma, Role, RegisteredVia, ConsentVia, Gender, PatientProgramStatus, Prisma } from '@ips/db';
 import { parse as parseCsv } from 'csv-parse/sync';
 import { NotFoundError, ValidationError } from '../utils/errors';
 
@@ -239,6 +239,21 @@ export async function getPatientById(patientId: string, doctorId: string, role: 
 
 // ─── CREATE / UPSERT by DNI ──────────────────────────────────────────────────
 
+// Mapea la vía de registro al canal por el que se obtuvo el consentimiento
+// (trazabilidad ley 25.326 art. 5).
+function consentViaFromRegisteredVia(rv: RegisteredVia): ConsentVia {
+  switch (rv) {
+    case RegisteredVia.BOT:
+      return ConsentVia.BOT;
+    case RegisteredVia.IMPORT:
+      return ConsentVia.IMPORT;
+    case RegisteredVia.PANEL:
+      return ConsentVia.PANEL;
+    default:
+      return ConsentVia.UNKNOWN;
+  }
+}
+
 export async function upsertPatientByDni(
   input: PatientCreateInput,
   registeredVia: RegisteredVia = RegisteredVia.PANEL
@@ -262,6 +277,7 @@ export async function upsertPatientByDni(
     return { patient: updated, created: false };
   }
 
+  const consentGiven = input.consent ?? true;
   const created = await prisma.patient.create({
     data: {
       fullName: input.fullName,
@@ -269,7 +285,10 @@ export async function upsertPatientByDni(
       phone: input.phone ?? null,
       birthDate: parseDateOrUndefined(input.birthDate) ?? null,
       gender: input.gender ?? null,
-      consent: input.consent ?? true,
+      consent: consentGiven,
+      // Trazabilidad: registra cuándo y por qué vía se obtuvo el consentimiento.
+      consentAt: consentGiven ? new Date() : null,
+      consentVia: consentGiven ? consentViaFromRegisteredVia(registeredVia) : null,
       registeredVia,
     },
   });
@@ -321,7 +340,10 @@ export async function updatePatient(
         ? { birthDate: parseDateOrUndefined(input.birthDate) ?? null }
         : {}),
       ...(input.gender !== undefined ? { gender: input.gender } : {}),
-      ...(input.consent !== undefined ? { consent: input.consent } : {}),
+      // Cambio de consentimiento desde el panel → registra cuándo y la vía.
+      ...(input.consent !== undefined
+        ? { consent: input.consent, consentAt: new Date(), consentVia: ConsentVia.PANEL }
+        : {}),
     },
   });
 

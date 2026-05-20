@@ -56,6 +56,29 @@ enum MessageRole {
   SYSTEM
 }
 
+// Acción registrada en el audit log (trazabilidad ley 25.326 art. 9).
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+// Quién originó la acción auditada. SYSTEM = crons; BOT = webhook WhatsApp.
+enum ActorType {
+  ADMIN
+  DOCTOR
+  SYSTEM
+  BOT
+}
+
+// Vía por la que se obtuvo/cambió el consentimiento del paciente.
+enum ConsentVia {
+  PANEL
+  BOT
+  IMPORT
+  UNKNOWN
+}
+
 // ─── Models ────────────────────────────────────────────────────────
 
 model Doctor {
@@ -96,9 +119,14 @@ model Patient {
   birthDate      DateTime?     @db.Date
   gender         Gender?
   consent        Boolean       @default(true)
+  // Trazabilidad de consentimiento (ley 25.326 art. 5: previo, expreso e informado).
+  // consentAt/consentVia registran CUÁNDO y CÓMO se obtuvo o cambió el consent.
+  consentAt      DateTime?     @db.Timestamptz()
+  consentVia     ConsentVia?
   registeredVia  RegisteredVia @default(PANEL)
   whatsappLinked Boolean       @default(false)
   createdAt      DateTime      @default(now()) @db.Timestamptz()
+  updatedAt      DateTime      @updatedAt @db.Timestamptz()
 
   // Followup tracking — para pacientes registrados sin programa.
   // El cron diario les manda hasta N recordatorios espaciados para que se
@@ -143,6 +171,7 @@ model PatientProgram {
   lastControlDate    DateTime?            @db.Date
   nextReminderDate   DateTime             @db.Date
   status             PatientProgramStatus @default(ACTIVE)
+  updatedAt          DateTime             @updatedAt @db.Timestamptz()
 
   patient          Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
   program          Program  @relation(fields: [programId], references: [id], onDelete: Restrict)
@@ -168,6 +197,7 @@ model Reminder {
   patientReplied Boolean        @default(false)
 
   createdAt DateTime @default(now()) @db.Timestamptz()
+  updatedAt DateTime @updatedAt @db.Timestamptz()
 
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
   program Program @relation(fields: [programId], references: [id], onDelete: Restrict)
@@ -293,4 +323,24 @@ model MedicationReminder {
   @@index([patientId, active])
   @@index([active, reminderHour, reminderMinute])
   @@map("medication_reminders")
+}
+
+// Registro inmutable de modificaciones sobre datos sensibles (ley 25.326 art. 9:
+// trazabilidad). NO guarda valores de campos para no duplicar PII: solo QUIÉN,
+// QUÉ acción, sobre QUÉ tabla/registro, QUÉ campos se tocaron y CUÁNDO.
+// Sin FK al Doctor a propósito: el log debe sobrevivir al borrado del actor.
+model AuditLog {
+  id            String      @id @default(uuid()) @db.Uuid
+  actorType     ActorType
+  actorId       String?     @db.Uuid // doctorId; null para SYSTEM/BOT
+  action        AuditAction
+  model         String      @db.VarChar(64) // modelo Prisma afectado
+  recordId      String?     @db.VarChar(64) // id del registro afectado, si se conoce
+  changedFields String[] // nombres de campos modificados, SIN valores
+  createdAt     DateTime    @default(now()) @db.Timestamptz()
+
+  @@index([model, recordId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }

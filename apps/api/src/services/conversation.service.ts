@@ -3,6 +3,7 @@ import {
   ConversationStatus,
   MessageRole,
   RegisteredVia,
+  ConsentVia,
   PatientProgramStatus,
   Role,
 } from '@ips/db';
@@ -445,6 +446,9 @@ async function handleRegistration(
           dni,
           phone: e164Phone,
           consent: true,
+          // Trazabilidad: alta por el bot implica consentimiento dado vía WhatsApp.
+          consentAt: new Date(),
+          consentVia: ConsentVia.BOT,
           registeredVia: RegisteredVia.BOT,
           whatsappLinked: true,
         },
@@ -746,7 +750,8 @@ async function handleBaja(
 ): Promise<void> {
   await prisma.patient.update({
     where: { id: patientId },
-    data: { consent: false },
+    // Trazabilidad: registra cuándo y por qué vía el paciente revocó el consentimiento.
+    data: { consent: false, consentAt: new Date(), consentVia: ConsentVia.BOT },
   });
 
   const message =
@@ -767,7 +772,8 @@ async function handleAlta(
 ): Promise<void> {
   await prisma.patient.update({
     where: { id: patientId },
-    data: { consent: true },
+    // Trazabilidad: registra la reactivación del consentimiento vía bot.
+    data: { consent: true, consentAt: new Date(), consentVia: ConsentVia.BOT },
   });
 
   const message =

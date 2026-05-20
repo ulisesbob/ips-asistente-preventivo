@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma, Role } from '@ips/db';
+import { prisma, Role, setAuditActor } from '@ips/db';
 import { config } from '../config/env';
 import { UnauthorizedError, ForbiddenError } from '../utils/errors';
 
@@ -75,6 +75,12 @@ export async function requireAuth(
       role: doctor.role,
       fullName: doctor.fullName,
     };
+
+    // Eleva el actor del audit log de SYSTEM al médico autenticado.
+    setAuditActor({
+      actorType: doctor.role === Role.ADMIN ? 'ADMIN' : 'DOCTOR',
+      actorId: doctor.id,
+    });
 
     next();
   } catch (err) {

@@ -9,6 +9,7 @@ import { config } from './config/env';
 import { router } from './routes';
 import { errorHandler } from './middleware/error-handler';
 import { requestLogger } from './middleware/request-logger';
+import { auditContextMiddleware } from './middleware/audit-context';
 import { getCronStatus } from './services/reminder.service';
 
 const app = express();
@@ -109,6 +110,12 @@ app.get('/health/cron', (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// ─── Audit context (trazabilidad ley 25.326) ────────────────────────────────
+// Abre el contexto de auditoría para las rutas de la API. requireAuth eleva el
+// actor al médico autenticado; el resto queda como SYSTEM.
+
+app.use(auditContextMiddleware);
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
 
