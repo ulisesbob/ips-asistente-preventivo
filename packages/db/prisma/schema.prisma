@@ -127,6 +127,9 @@ model Patient {
   whatsappLinked Boolean       @default(false)
   createdAt      DateTime      @default(now()) @db.Timestamptz()
   updatedAt      DateTime      @updatedAt @db.Timestamptz()
+  // Soft-delete (retención ley 25.326 + derecho de supresión art. 16).
+  // Borrar un paciente = setear deletedAt; nunca DELETE físico (preserva historia).
+  deletedAt      DateTime?     @db.Timestamptz()
 
   // Followup tracking — para pacientes registrados sin programa.
   // El cron diario les manda hasta N recordatorios espaciados para que se
@@ -144,6 +147,7 @@ model Patient {
 
   // phone already has @unique which creates an index — no separate @@index needed
   @@index([fullName])
+  @@index([deletedAt])
   @@map("patients")
 }
 

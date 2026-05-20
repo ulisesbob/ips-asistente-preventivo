@@ -1,4 +1,4 @@
-import { prisma, Role, RegisteredVia, ConsentVia, Gender, PatientProgramStatus, Prisma } from '@ips/db';
+import { prisma, Role, RegisteredVia, ConsentVia, Gender, PatientProgramStatus, SelfReminderStatus, Prisma } from '@ips/db';
 import { parse as parseCsv } from 'csv-parse/sync';
 import { NotFoundError, ValidationError } from '../utils/errors';
 
@@ -88,6 +88,8 @@ export async function listPatients(
 
   // Build the where clause
   const where: Prisma.PatientWhereInput = {
+    // Soft-delete: nunca listar pacientes borrados.
+    deletedAt: null,
     ...(search
       ? {
           OR: [
@@ -272,6 +274,10 @@ export async function upsertPatientByDni(
           ? { birthDate: parseDateOrUndefined(input.birthDate) }
           : {}),
         ...(input.gender && !existing.gender ? { gender: input.gender } : {}),
+        // Reactivación por DNI: si el paciente estaba borrado, vuelve a estar activo
+        // (preserva su historia). Los programas siguen pausados hasta que un médico
+        // los reactive.
+        ...(existing.deletedAt ? { deletedAt: null } : {}),
       },
     });
     return { patient: updated, created: false };
@@ -348,6 +354,47 @@ export async function updatePatient(
   });
 
   return updated;
+}
+
+// ─── SOFT DELETE ──────────────────────────────────────────────────────────────
+
+// Borrado lógico: marca deletedAt y pausa los programas activos para que el cron
+// deje de enviar recordatorios. Nunca borra físico (retención ley 25.326 + derecho
+// de supresión art. 16). Solo ADMIN — el endpoint aplica requireAdmin.
+export async function softDeletePatient(patientId: string): Promise<void> {
+  const existing = await prisma.patient.findFirst({
+    where: { id: patientId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!existing) throw new NotFoundError('Paciente no encontrado');
+
+  // Un solo update atómico: marca deletedAt y corta todas las fuentes de mensajes
+  // (programas, recordatorios de medicación y self-reminders) para que ningún cron
+  // le siga escribiendo a un paciente dado de baja.
+  await prisma.patient.update({
+    where: { id: patientId },
+    data: {
+      deletedAt: new Date(),
+      programs: {
+        updateMany: {
+          where: { status: PatientProgramStatus.ACTIVE },
+          data: { status: PatientProgramStatus.PAUSED },
+        },
+      },
+      medicationReminders: {
+        updateMany: {
+          where: { active: true },
+          data: { active: false },
+        },
+      },
+      selfReminders: {
+        updateMany: {
+          where: { status: SelfReminderStatus.PENDING },
+          data: { status: SelfReminderStatus.CANCELLED },
+        },
+      },
+    },
+  });
 }
 
 // ─── CSV IMPORT ───────────────────────────────────────────────────────────────
@@ -506,7 +553,7 @@ export async function importPatientsFromCsv(csvContent: string): Promise<ImportR
     for (const { data } of validRows) {
       const existing = await tx.patient.findUnique({
         where: { dni: data.dni },
-        select: { id: true, phone: true, birthDate: true, gender: true },
+        select: { id: true, phone: true, birthDate: true, gender: true, deletedAt: true },
       });
 
       if (existing) {
@@ -514,6 +561,8 @@ export async function importPatientsFromCsv(csvContent: string): Promise<ImportR
         if (data.phone && !existing.phone) updates.phone = data.phone;
         if (data.birthDate && !existing.birthDate) updates.birthDate = parseDateOrUndefined(data.birthDate);
         if (data.gender && !existing.gender) updates.gender = data.gender;
+        // Reactivación por DNI: re-importar un paciente borrado lo reactiva.
+        if (existing.deletedAt) updates.deletedAt = null;
 
         if (Object.keys(updates).length > 0) {
           await tx.patient.update({
