@@ -1,7 +1,17 @@
+import type PgBoss from 'pg-boss';
 import { prisma, SelfReminderStatus } from '@ips/db';
 import { sendTextMessage } from './messaging.service';
-import { maskPhone, firstName } from '../utils/pii';
+import { maskPhone, maskId, firstName } from '../utils/pii';
 import { toMetaSendablePhone } from '../utils/phone';
+import { config } from '../config/env';
+import { logger } from '../utils/logger';
+import { getBoss } from '../queue/boss';
+import { limiter } from '../queue/limiter';
+import {
+  QUEUE_NAMES,
+  selfSingletonKey,
+  type SelfJobPayload,
+} from '../queue/queues';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -265,46 +275,88 @@ export async function listSelfRemindersForPanel(patientId: string) {
 
 // ─── CRON: Process due self-reminders ────────────────────────────────────────
 
-export async function processDueSelfReminders(): Promise<{ sent: number; failed: number }> {
-  // Get current Argentina time (LESSONS #16)
-  const argFormatter = new Intl.DateTimeFormat('en-US', {
+const SELF_RATE_LIMIT_MS = 100;
+// Tamaño de lote de la paginación del productor. No es un tope: itera hasta agotar.
+const SELF_ENQUEUE_BATCH_SIZE = 200;
+// Recordatorios permanentemente vencidos (>48h) que fallan al enviar se cancelan
+// para no reintentar infinitamente.
+const SELF_OVERDUE_CANCEL_MS = 48 * 60 * 60 * 1000;
+
+/** Ventana temporal actual en Argentina (LESSONS #16). */
+function currentSelfReminderWindow(): {
+  todayUtc: Date;
+  argHour: number;
+  slot: number;
+} {
+  const parts = new Intl.DateTimeFormat('en-US', {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: 'numeric', minute: 'numeric', hour12: false,
     timeZone: 'America/Argentina/Buenos_Aires',
-  });
-  const parts = argFormatter.formatToParts(new Date());
+  }).formatToParts(new Date());
   const argYear = parseInt(parts.find((p) => p.type === 'year')?.value ?? '2026');
   const argMonth = parseInt(parts.find((p) => p.type === 'month')?.value ?? '1') - 1;
   const argDay = parseInt(parts.find((p) => p.type === 'day')?.value ?? '1');
   const argHour = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0');
   const argMinute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  return {
+    todayUtc: new Date(Date.UTC(argYear, argMonth, argDay)),
+    argHour,
+    slot: argMinute < 15 ? 0 : 30,
+  };
+}
 
-  const todayUtc = new Date(Date.UTC(argYear, argMonth, argDay));
-  const slot = argMinute < 15 ? 0 : 30;
+/**
+ * Condición OR de "vencido o en el slot actual": fechas pasadas (cualquier hora) +
+ * hoy con hora:minuto <= ahora. Compartida por el `where` de candidatos y por el
+ * guard del handler (para que un reintento tras bump/SENT NO reenvíe).
+ */
+function selfDueOR(todayUtc: Date, argHour: number, slot: number) {
+  return [
+    // Fechas pasadas — vencidas
+    { reminderDate: { lt: todayUtc } },
+    // Hoy, slot actual o anterior
+    {
+      reminderDate: todayUtc,
+      OR: [
+        { reminderHour: { lt: argHour } },
+        { reminderHour: argHour, reminderMinute: { lte: slot } },
+      ],
+    },
+  ];
+}
+
+/**
+ * `where` de self-reminders a enviar HOY. Compartido entre el camino viejo (con
+ * `take`) y el productor de la cola (paginado sin tope).
+ */
+function selfCandidateWhere(todayUtc: Date, argHour: number, slot: number) {
+  return {
+    status: SelfReminderStatus.PENDING,
+    OR: selfDueOR(todayUtc, argHour, slot),
+    patient: {
+      consent: true,
+      phone: { not: null },
+    },
+  };
+}
+
+/** Texto del self-reminder. Puro (exportado para tests). */
+export function buildSelfReminderMessage(fullName: string, description: string): string {
+  const greetName = firstName(fullName);
+  return (
+    `Hola ${greetName}! Te recuerdo:\n\n` +
+    `📌 *${description}*\n\n` +
+    `Este recordatorio lo creaste vos desde el chat. ¡Éxitos!`
+  );
+}
+
+export async function processDueSelfReminders(): Promise<{ sent: number; failed: number }> {
+  const { todayUtc, argHour, slot } = currentSelfReminderWindow();
 
   console.log(`[SelfReminder] Checking for date=${todayUtc.toISOString().slice(0, 10)} hour=${argHour} minute=${slot}`);
 
-  // Query: past dates (any time) + today with hour:minute <= now
   const reminders = await prisma.patientSelfReminder.findMany({
-    where: {
-      status: SelfReminderStatus.PENDING,
-      OR: [
-        // Past dates — overdue
-        { reminderDate: { lt: todayUtc } },
-        // Today, current slot or earlier
-        {
-          reminderDate: todayUtc,
-          OR: [
-            { reminderHour: { lt: argHour } },
-            { reminderHour: argHour, reminderMinute: { lte: slot } },
-          ],
-        },
-      ],
-      patient: {
-        consent: true,
-        phone: { not: null },
-      },
-    },
+    where: selfCandidateWhere(todayUtc, argHour, slot),
     take: MAX_PER_CRON_RUN,
     select: {
       id: true,
@@ -346,11 +398,7 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
     }
 
     const sendPhone = toMetaSendablePhone(r.patient.phone);
-    const greetName = firstName(r.patient.fullName);
-    const message =
-      `Hola ${greetName}! Te recuerdo:\n\n` +
-      `📌 *${r.description}*\n\n` +
-      `Este recordatorio lo creaste vos desde el chat. ¡Éxitos!`;
+    const message = buildSelfReminderMessage(r.patient.fullName, r.description);
 
     try {
       await sendTextMessage(sendPhone, message);
@@ -374,7 +422,7 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
       console.error(`[SelfReminder] Error sending to ${maskPhone(sendPhone)}:`, err);
       // Cancel permanently overdue reminders (>48h past) to avoid infinite retries
       const ageMs = Date.now() - new Date(r.reminderDate).getTime();
-      if (ageMs > 48 * 60 * 60 * 1000) {
+      if (ageMs > SELF_OVERDUE_CANCEL_MS) {
         await prisma.patientSelfReminder.update({
           where: { id: r.id },
           data: { status: SelfReminderStatus.CANCELLED },
@@ -385,11 +433,198 @@ export async function processDueSelfReminders(): Promise<{ sent: number; failed:
     }
 
     // Rate limit
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, SELF_RATE_LIMIT_MS));
   }
 
   console.log(`[SelfReminder] Sent ${sent}, failed ${failed}`);
   return { sent, failed };
+}
+
+// ─── Bloque B (T12): camino por cola pg-boss (detrás de QUEUE_SELF) ────────────
+//
+// PRODUCTOR: enqueueSelfReminders encola 1 job por recordatorio vencido/en-slot
+// (sin tope, paginando) y NO envía. CONSUMIDOR: makeSelfReminderHandler envía vía
+// limiter y aplica el efecto de forma idempotente. Idempotencia en 2 capas:
+//   1) singletonKey (self:{selfReminderId}:{date}) + policy 'short' → no se encola
+//      dos veces el mismo día.
+//   2) guard en el handler: re-lee status PENDING + consent + la MISMA ventana
+//      temporal del productor (selfDueOR). Reincluir la ventana es lo que hace
+//      idempotente al bump de los recurring: tras reprogramar a mañana, un reintento
+//      ya NO matchea la ventana → skip. El update post-envío usa where CONDICIONAL
+//      con esa misma ventana. El envío va FUERA de transacción.
+//   - send=false y >48h vencido → CANCELLED sin throw (se rinde, igual que el viejo);
+//     si no → throw (pg-boss reintenta).
+
+/**
+ * Productor: encola un job por CADA self-reminder vencido/en-slot hoy, sin el tope
+ * `take` del camino viejo. Pagina por cursor. NO envía nada.
+ */
+export async function enqueueSelfReminders(
+  boss: PgBoss = getBoss()
+): Promise<{ enqueued: number }> {
+  const { todayUtc, argHour, slot } = currentSelfReminderWindow();
+  const where = selfCandidateWhere(todayUtc, argHour, slot);
+  const date = todayArgentinaISO();
+
+  let enqueued = 0;
+  let cursor: string | undefined;
+
+  for (;;) {
+    const batch = await prisma.patientSelfReminder.findMany({
+      where,
+      take: SELF_ENQUEUE_BATCH_SIZE,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        patientId: true,
+        patient: { select: { phone: true } },
+      },
+    });
+
+    if (batch.length === 0) break;
+
+    for (const r of batch) {
+      if (!r.patient.phone) continue;
+      const payload: SelfJobPayload = {
+        selfReminderId: r.id,
+        patientId: r.patientId,
+        phone: toMetaSendablePhone(r.patient.phone),
+        date,
+      };
+      const id = await boss.send(QUEUE_NAMES.self, payload, {
+        singletonKey: selfSingletonKey(r.id, date),
+        retryLimit: 5,
+        retryBackoff: true,
+      });
+      if (id) enqueued++;
+    }
+
+    cursor = batch[batch.length - 1].id;
+    if (batch.length < SELF_ENQUEUE_BATCH_SIZE) break;
+  }
+
+  logger.info('self-reminders encolados', {
+    event: 'queue',
+    action: 'enqueue_self',
+    enqueued,
+  });
+
+  return { enqueued };
+}
+
+/** Forma mínima de un job que necesita el handler (compatible con PgBoss.Job). */
+type JobLike<T> = { id: string; data: T };
+
+/**
+ * Consumidor: construye el handler del worker `reminders:self`. Patrón C2 +
+ * particularidades de self (re-read de status, recurring vs one-time, cancelar >48h).
+ */
+export function makeSelfReminderHandler(): (
+  jobs: JobLike<SelfJobPayload>[]
+) => Promise<void> {
+  return async (jobs: JobLike<SelfJobPayload>[]): Promise<void> => {
+    for (const job of jobs) {
+      await processSelfReminderJob(job.data);
+    }
+  };
+}
+
+async function processSelfReminderJob(payload: SelfJobPayload): Promise<void> {
+  const { selfReminderId, phone } = payload;
+  const { todayUtc, argHour, slot } = currentSelfReminderWindow();
+  const dueOR = selfDueOR(todayUtc, argHour, slot);
+
+  // 1) GUARD: re-lee status PENDING + consent + la ventana temporal (race con
+  // cancelación del bot + idempotencia del bump recurring). Si no → skip.
+  const reminder = await prisma.patientSelfReminder.findFirst({
+    where: {
+      id: selfReminderId,
+      status: SelfReminderStatus.PENDING,
+      patient: { consent: true },
+      OR: dueOR,
+    },
+    select: {
+      id: true,
+      description: true,
+      recurring: true,
+      reminderDate: true,
+      patient: { select: { fullName: true } },
+    },
+  });
+
+  if (!reminder) {
+    logger.info('self skip — ya no es candidato (cancelado / enviado / fuera de ventana)', {
+      event: 'queue',
+      action: 'self_skip',
+      selfReminderId: maskId(selfReminderId),
+    });
+    return;
+  }
+
+  const message = buildSelfReminderMessage(reminder.patient.fullName, reminder.description);
+
+  if (config.QUEUE_SHADOW) {
+    logger.info('self SHADOW — habría enviado', {
+      event: 'queue',
+      action: 'self_shadow',
+      selfReminderId: maskId(selfReminderId),
+      phone: maskPhone(phone),
+    });
+    return;
+  }
+
+  // 2) ENVÍO FUERA de transacción. Normalizamos CUALQUIER fallo (return false o
+  // excepción de red) a `ok=false` para que el criterio de "rendirse a las >48h"
+  // se aplique igual sin importar cómo falló el envío — el viejo solo lo hacía ante
+  // excepción (catch); acá unificamos ambos caminos.
+  let ok = false;
+  try {
+    ok = await limiter.schedule(() => sendTextMessage(phone, message));
+  } catch (err) {
+    logger.warn('self envío lanzó excepción', {
+      event: 'queue',
+      action: 'self_send_error',
+      selfReminderId: maskId(selfReminderId),
+      error: err instanceof Error ? err.message : String(err),
+    });
+    ok = false;
+  }
+  if (!ok) {
+    // Permanentemente vencido (>48h): se rinde (CANCELLED), no reintenta — mismo
+    // criterio que el viejo. Si no, throw → pg-boss reintenta.
+    const ageMs = Date.now() - new Date(reminder.reminderDate).getTime();
+    if (ageMs > SELF_OVERDUE_CANCEL_MS) {
+      await prisma.patientSelfReminder.updateMany({
+        where: { id: reminder.id, status: SelfReminderStatus.PENDING },
+        data: { status: SelfReminderStatus.CANCELLED },
+      });
+      logger.warn('self CANCELLED — vencido >48h y falló el envío', {
+        event: 'queue',
+        action: 'self_cancel_overdue',
+        selfReminderId: maskId(selfReminderId),
+      });
+      return;
+    }
+    throw new Error('send_failed');
+  }
+
+  // 3) UPDATE con where CONDICIONAL (reincluye el guard). recurring → reprograma a
+  // mañana; one-time → SENT. La ventana en el where hace idempotente el reintento
+  // del recurring (tras el bump ya no matchea).
+  if (reminder.recurring) {
+    const tomorrow = new Date(todayUtc);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    await prisma.patientSelfReminder.updateMany({
+      where: { id: reminder.id, status: SelfReminderStatus.PENDING, OR: dueOR },
+      data: { reminderDate: tomorrow },
+    });
+  } else {
+    await prisma.patientSelfReminder.updateMany({
+      where: { id: reminder.id, status: SelfReminderStatus.PENDING },
+      data: { status: SelfReminderStatus.SENT },
+    });
+  }
 }
 
 // ─── FORMAT FOR BOT CONTEXT ─────────────────────────────────────────────────

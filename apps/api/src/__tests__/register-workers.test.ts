@@ -11,14 +11,17 @@ const mockConfig: {
   QUEUE_FOLLOWUP: boolean;
   QUEUE_SURVEY: boolean;
   QUEUE_MEDICATION: boolean;
+  QUEUE_SELF: boolean;
 } = {
   QUEUE_FOLLOWUP: false,
   QUEUE_SURVEY: false,
   QUEUE_MEDICATION: false,
+  QUEUE_SELF: false,
 };
 const mockMakeFollowupHandler = vi.fn(() => async () => undefined);
 const mockMakeSurveyHandler = vi.fn(() => async () => undefined);
 const mockMakeMedicationHandler = vi.fn(() => async () => undefined);
+const mockMakeSelfReminderHandler = vi.fn(() => async () => undefined);
 const mockRegisterDeadLetterHandler = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../config/env', () => ({ config: mockConfig }));
@@ -35,6 +38,10 @@ vi.mock('../services/medication-reminder.service', () => ({
   makeMedicationHandler: mockMakeMedicationHandler,
 }));
 
+vi.mock('../services/self-reminder.service', () => ({
+  makeSelfReminderHandler: mockMakeSelfReminderHandler,
+}));
+
 vi.mock('../queue/send-worker', () => ({
   registerDeadLetterHandler: mockRegisterDeadLetterHandler,
 }));
@@ -44,6 +51,7 @@ beforeEach(() => {
   mockConfig.QUEUE_FOLLOWUP = false;
   mockConfig.QUEUE_SURVEY = false;
   mockConfig.QUEUE_MEDICATION = false;
+  mockConfig.QUEUE_SELF = false;
 });
 
 function makeFakeBoss() {
@@ -177,6 +185,32 @@ describe('registerQueueWorkers', () => {
     const workCalls = work.mock.calls.filter((c) => c[0] === 'reminders:medication');
     expect(workCalls).toHaveLength(1);
     expect(mockMakeMedicationHandler).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── T12: Self-reminders ─────────────────────────────────────────────────────
+
+  it('self OFF: NO registra worker ni crea cola de self', async () => {
+    const { boss, work, createQueue } = makeFakeBoss();
+    const { registerQueueWorkers } = await import('../queue/register-workers');
+    await registerQueueWorkers(boss);
+
+    expect(work.mock.calls.filter((c) => c[0] === 'reminders:self')).toHaveLength(0);
+    expect(createQueue.mock.calls.filter((c) => c[0] === 'reminders:self')).toHaveLength(0);
+  });
+
+  it('self ON: crea cola reminders:self (short + deadLetter) y registra su worker', async () => {
+    mockConfig.QUEUE_SELF = true;
+    const { boss, work, createQueue } = makeFakeBoss();
+    const { registerQueueWorkers } = await import('../queue/register-workers');
+    await registerQueueWorkers(boss);
+
+    const createCalls = createQueue.mock.calls.filter((c) => c[0] === 'reminders:self');
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0][1]).toMatchObject({ policy: 'short', deadLetter: 'reminders:dead' });
+
+    const workCalls = work.mock.calls.filter((c) => c[0] === 'reminders:self');
+    expect(workCalls).toHaveLength(1);
+    expect(mockMakeSelfReminderHandler).toHaveBeenCalledTimes(1);
   });
 
   it('C1: createQueue de followup ocurre ANTES de work(followup)', async () => {
