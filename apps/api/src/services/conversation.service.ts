@@ -13,16 +13,19 @@ import { responseLeaksNotes } from '../utils/note-leak';
 import { getLatestNotesForBot } from './note.service';
 import { getRelevantKBForBot } from './knowledge.service';
 import { processSurveyResponse } from './survey.service';
-import { getMedicationsForBot, createMedReminderFromBot } from './medication-reminder.service';
+import { getMedicationsForBot } from './medication-reminder.service';
 import {
   getSelfRemindersForBot,
   createSelfReminder,
   listActiveSelfReminders,
-  cancelSelfReminder,
+  cancelSelfReminders,
+  cancelAllSelfReminders,
   parseSelfReminderTag,
   parseListRemindersTag,
   parseCancelReminderTag,
+  parseCancelAllRemindersTag,
   formatRemindersForWhatsApp,
+  todayArgentinaISO,
 } from './self-reminder.service';
 import { maskId, maskPhone, firstName } from '../utils/pii';
 import { config } from '../config/env';
@@ -622,7 +625,11 @@ async function handleReminderFlow(
     return;
   }
 
-  // Step 2: Got time → create MedicationReminder directly (same table the doctor uses)
+  // Step 2: Got time → create a PatientSelfReminder RECURRENTE DIARIO.
+  // Unificación (fix recordatorios): lo que el paciente crea por chat va SIEMPRE
+  // a PatientSelfReminder, la MISMA tabla que listar/cancelar usan. Antes esto
+  // creaba un MedicationReminder (tabla del médico) y el listar/cancelar miraban
+  // otra tabla → contradicciones y cancelaciones que no cancelaban.
   if (state.step === 'AWAITING_TIME') {
     const timeText = text.trim();
     const timeMatch = timeText.match(/(\d{1,2})[:\.](\d{2})/);
@@ -642,35 +649,34 @@ async function handleReminderFlow(
       return;
     }
 
-    // Round minute to nearest 30 (medication cron runs at :00 and :30)
+    // createSelfReminder redondea el minuto al slot de 30 internamente; avisamos
+    // igual si redondeamos para no cambiar la hora en silencio (audit #25).
     const roundedMinute = minute < 15 ? 0 : 30;
     const wasRounded = roundedMinute !== minute;
 
     reminderFlowState.delete(phone);
 
-    try {
-      await createMedReminderFromBot(
-        patientId,
-        state.description!,
-        'Según indicación médica',
-        hour,
-        roundedMinute
-      );
+    const result = await createSelfReminder(patientId, {
+      description: state.description!,
+      date: todayArgentinaISO(), // recurrente diario "a partir de hoy"
+      time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+      recurring: true,
+    });
 
-      const timeDisplay = `${String(hour).padStart(2, '0')}:${String(roundedMinute).padStart(2, '0')}`;
-      // Audit #25: si redondeamos la hora, decírselo explícitamente al paciente
-      // (antes se cambiaba 8:15 → 8:30 sin avisar).
-      const roundingNote = wasRounded
-        ? ` (redondeé al horario más cercano porque los recordatorios van cada 30 min)`
-        : '';
-      const msg =
-        `Listo! Te voy a recordar *"${state.description}"* todos los días a las ${timeDisplay} hs${roundingNote}.\n\n` +
-        `El recordatorio aparece en tu ficha y tu médico también lo puede ver.`;
+    if (!result.success) {
+      const msg = `No pude crear el recordatorio: ${result.message}`;
       await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
-    } catch (err) {
-      const msg = `No pude crear el recordatorio: ${err instanceof Error ? err.message : 'Error'}`;
-      await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
+      return;
     }
+
+    const timeDisplay = `${String(hour).padStart(2, '0')}:${String(roundedMinute).padStart(2, '0')}`;
+    const roundingNote = wasRounded
+      ? ` (redondeé al horario más cercano porque los recordatorios van cada 30 min)`
+      : '';
+    const msg =
+      `Listo! Te voy a recordar *"${state.description}"* todos los días a las ${timeDisplay} hs${roundingNote}.\n\n` +
+      `Para verlos escribime "mis recordatorios". Para cancelar, "cancelar recordatorio" y el número.`;
+    await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
     return;
   }
 }
@@ -788,13 +794,42 @@ async function handleChat(
     aiResponse = listTag.cleanResponse + '\n\n' + formatRemindersForWhatsApp(reminders);
   }
 
-  // 3. Check for cancel-reminder tag
-  const cancelTag = parseCancelReminderTag(aiResponse);
-  if (cancelTag.found && cancelTag.index !== undefined) {
-    const result = await cancelSelfReminder(patient.id, cancelTag.index);
-    aiResponse = cancelTag.cleanResponse;
-    if (!result.success) {
-      aiResponse += `\n\n⚠️ ${result.message}`;
+  // 3. Check for cancel-ALL-reminders tag (chequear ANTES del de índices).
+  // CRÍTICO: la confirmación la arma el CÓDIGO con el conteo REAL de la DB. La IA
+  // sólo emite el tag, NUNCA confirma cancelaciones por su cuenta (evita que
+  // alucine "listo, cancelé todos" cuando no se canceló nada).
+  const cancelAllTag = parseCancelAllRemindersTag(aiResponse);
+  if (cancelAllTag.found) {
+    const result = await cancelAllSelfReminders(patient.id);
+    // La confirmación es SOLO del sistema; descartamos la intro de la IA para que
+    // no contradiga el resultado real (ej. "listo, cancelé todos" con 0 cancelados).
+    aiResponse =
+      result.cancelledCount > 0
+        ? `✅ Cancelé tus ${result.cancelledCount} recordatorio(s) personal(es).`
+        : 'No tenías recordatorios personales activos para cancelar.';
+  } else {
+    // 3b. Cancel por índice(s): <<CANCEL_REMINDER:N>> o <<CANCEL_REMINDER:1,2,3>>
+    const cancelTag = parseCancelReminderTag(aiResponse);
+    if (cancelTag.found && cancelTag.indices) {
+      const result = await cancelSelfReminders(patient.id, cancelTag.indices);
+      // Confirmación SOLO del sistema; descartamos la intro de la IA para que no
+      // contradiga el resultado real de la cancelación.
+      if (result.cancelledCount > 0) {
+        const detail =
+          result.cancelledDescriptions.length > 0
+            ? ` (${result.cancelledDescriptions.map((d) => `"${d}"`).join(', ')})`
+            : '';
+        aiResponse = `✅ Cancelé ${result.cancelledCount} recordatorio(s)${detail}.`;
+        if (result.invalidIndices.length > 0) {
+          aiResponse += `\nNo encontré el/los número(s): ${result.invalidIndices.join(', ')}.`;
+        }
+      } else {
+        // Nada se canceló: o el número no existe o la lista está vacía. NUNCA
+        // afirmamos que cancelamos.
+        aiResponse =
+          '⚠️ No encontré ningún recordatorio con ese número para cancelar. ' +
+          'Escribime "mis recordatorios" para ver la lista con sus números.';
+      }
     }
   }
 

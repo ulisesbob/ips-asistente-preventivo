@@ -87,6 +87,40 @@ export async function createSelfReminder(
   // Round minute to nearest 30 (cron runs every 30 min)
   const roundedMinute = minute < 15 ? 0 : 30;
 
+  const isRecurring = input.recurring === true;
+
+  // Dedupe: si ya existe un recordatorio activo idéntico (misma descripción +
+  // hora + minuto + recurrencia), NO creamos un duplicado. En la evidencia de
+  // producción el paciente terminó con 3 recordatorios idénticos. Idempotente:
+  // devolvemos el existente como si lo hubiéramos creado.
+  const duplicate = await prisma.patientSelfReminder.findFirst({
+    where: {
+      patientId,
+      status: SelfReminderStatus.PENDING,
+      description: desc,
+      reminderHour: hour,
+      reminderMinute: roundedMinute,
+      recurring: isRecurring,
+    },
+    select: {
+      id: true,
+      description: true,
+      reminderDate: true,
+      reminderHour: true,
+      reminderMinute: true,
+      recurring: true,
+    },
+  });
+  if (duplicate) {
+    return {
+      success: true,
+      message: isRecurring
+        ? 'Ya tenías ese recordatorio diario, lo dejé como estaba.'
+        : 'Ya tenías ese recordatorio, lo dejé como estaba.',
+      reminder: duplicate,
+    };
+  }
+
   // Check active reminders limit
   const activeCount = await prisma.patientSelfReminder.count({
     where: { patientId, status: SelfReminderStatus.PENDING },
@@ -99,7 +133,6 @@ export async function createSelfReminder(
   }
 
   // Create
-  const isRecurring = input.recurring === true;
   const reminder = await prisma.patientSelfReminder.create({
     data: {
       patientId,
@@ -142,29 +175,72 @@ export async function listActiveSelfReminders(patientId: string) {
 
 // ─── CANCEL ───────────────────────────────────────────────────────────────────
 
-export async function cancelSelfReminder(
+export interface CancelResult {
+  /** Cuántos se cancelaron REALMENTE en la DB (fuente de verdad para el bot). */
+  cancelledCount: number;
+  /** Índices (1-based) pedidos que no corresponden a ningún recordatorio activo. */
+  invalidIndices: number[];
+  /** Descripciones de los recordatorios efectivamente cancelados. */
+  cancelledDescriptions: string[];
+}
+
+/**
+ * Cancela uno o varios recordatorios por índice (1-based, según el orden de
+ * listActiveSelfReminders). El conteo devuelto es el REAL de la DB; el bot debe
+ * armar su confirmación con esto, NUNCA inventarla.
+ */
+export async function cancelSelfReminders(
   patientId: string,
-  reminderIndex: number
-): Promise<{ success: boolean; message: string }> {
+  indices: number[]
+): Promise<CancelResult> {
   const reminders = await listActiveSelfReminders(patientId);
 
-  if (reminderIndex < 1 || reminderIndex > reminders.length) {
-    return {
-      success: false,
-      message: `No existe el recordatorio #${reminderIndex}. Tenés ${reminders.length} recordatorio(s) activo(s).`,
-    };
+  const validIds: string[] = [];
+  const cancelledDescriptions: string[] = [];
+  const invalidIndices: number[] = [];
+
+  // De-dup índices y mapear a IDs reales.
+  for (const idx of Array.from(new Set(indices))) {
+    if (idx < 1 || idx > reminders.length) {
+      invalidIndices.push(idx);
+      continue;
+    }
+    const r = reminders[idx - 1];
+    validIds.push(r.id);
+    cancelledDescriptions.push(r.description);
   }
 
-  const reminder = reminders[reminderIndex - 1];
-  await prisma.patientSelfReminder.update({
-    where: { id: reminder.id },
+  if (validIds.length === 0) {
+    return { cancelledCount: 0, invalidIndices, cancelledDescriptions: [] };
+  }
+
+  // updateMany acotado a este paciente + IDs válidos + PENDING (defensa contra
+  // race con el cron y contra cancelar lo de otro paciente).
+  const result = await prisma.patientSelfReminder.updateMany({
+    where: {
+      patientId,
+      status: SelfReminderStatus.PENDING,
+      id: { in: validIds },
+    },
     data: { status: SelfReminderStatus.CANCELLED },
   });
 
   return {
-    success: true,
-    message: `Recordatorio "${reminder.description}" cancelado.`,
+    cancelledCount: result.count,
+    invalidIndices,
+    cancelledDescriptions,
   };
+}
+
+/**
+ * Cancela TODOS los recordatorios activos del paciente. Devuelve el conteo real.
+ */
+export async function cancelAllSelfReminders(patientId: string): Promise<CancelResult> {
+  const result = await prisma.patientSelfReminder.updateMany({
+    where: { patientId, status: SelfReminderStatus.PENDING },
+    data: { status: SelfReminderStatus.CANCELLED },
+  });
+  return { cancelledCount: result.count, invalidIndices: [], cancelledDescriptions: [] };
 }
 
 // ─── LIST FOR PANEL (read-only, with access control) ─────────────────────────
@@ -336,6 +412,18 @@ function getTodayArgentina(): Date {
   return new Date(Date.UTC(y, m, d));
 }
 
+/**
+ * Fecha de hoy en Argentina como YYYY-MM-DD. La usa el flujo por keyword del
+ * chat para crear recordatorios recurrentes diarios "a partir de hoy".
+ */
+export function todayArgentinaISO(): string {
+  // en-CA produce el formato YYYY-MM-DD directamente.
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: 'America/Argentina/Buenos_Aires',
+  }).format(new Date());
+}
+
 // ─── PARSE AI TAG ─────────────────────────────────────────────────────────────
 
 /**
@@ -396,23 +484,47 @@ export function parseListRemindersTag(aiResponse: string): { found: boolean; cle
 
 /**
  * Parses the AI response for a cancel-reminder tag.
- * Format: <<CANCEL_REMINDER:N>>
+ * Soporta un índice o varios separados por coma:
+ *   <<CANCEL_REMINDER:2>>  ó  <<CANCEL_REMINDER:1,2,3>>
+ * Devuelve los índices (1-based, de-duplicados, en orden de aparición).
  */
 export function parseCancelReminderTag(
   aiResponse: string
-): { found: boolean; index?: number; cleanResponse: string } {
-  const tagRegex = /<<CANCEL_REMINDER:(\d+)>>/;
-  const tagRegexGlobal = /<<CANCEL_REMINDER:\d+>>/g;
+): { found: boolean; indices?: number[]; cleanResponse: string } {
+  // Capturamos la lista de dígitos separados por coma (con espacios opcionales).
+  const tagRegex = /<<CANCEL_REMINDER:(\d+(?:\s*,\s*\d+)*)>>/;
+  const tagRegexGlobal = /<<CANCEL_REMINDER:\d+(?:\s*,\s*\d+)*>>/g;
   const match = aiResponse.match(tagRegex);
 
   if (!match) {
     return { found: false, cleanResponse: aiResponse };
   }
 
-  const index = parseInt(match[1]);
+  const indices = Array.from(
+    new Set(
+      match[1]
+        .split(',')
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n))
+    )
+  );
+
   // Strip all instances (audit #22 — don't leak duplicates to the patient).
   const cleanResponse = aiResponse.replace(tagRegexGlobal, '').trim();
-  return { found: true, index, cleanResponse };
+  return { found: true, indices, cleanResponse };
+}
+
+/**
+ * Parses the AI response for a cancel-ALL-reminders tag.
+ * Format: <<CANCEL_ALL_REMINDERS>>
+ */
+export function parseCancelAllRemindersTag(
+  aiResponse: string
+): { found: boolean; cleanResponse: string } {
+  if (aiResponse.includes('<<CANCEL_ALL_REMINDERS>>')) {
+    return { found: true, cleanResponse: aiResponse.replace(/<<CANCEL_ALL_REMINDERS>>/g, '').trim() };
+  }
+  return { found: false, cleanResponse: aiResponse };
 }
 
 /**

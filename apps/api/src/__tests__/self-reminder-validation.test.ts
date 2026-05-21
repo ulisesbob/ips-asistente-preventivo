@@ -525,7 +525,7 @@ describe('Multiple tags coexistence in one AI response', () => {
 
       const cancelResult = parseCancelReminderTag(response);
       expect(cancelResult.found).toBe(true);
-      expect(cancelResult.index).toBe(3);
+      expect(cancelResult.indices).toEqual([3]);
     });
   });
 });
