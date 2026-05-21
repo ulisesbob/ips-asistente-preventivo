@@ -2,61 +2,50 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import { Activity, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { apiPost, ApiError } from '@/lib/api';
 
 type Status = 'verifying' | 'success' | 'error';
 
 function VerificarEmailInner() {
-  const searchParams = useSearchParams();
-
   const [status, setStatus] = useState<Status>('verifying');
   const [message, setMessage] = useState('');
   const startedRef = useRef(false);
 
   useEffect(() => {
-    // Evita disparar el POST dos veces (React StrictMode monta dos veces en dev y
-    // el token es de un solo uso: el 2º request lo recibiría ya consumido).
+    // Corre UNA sola vez en el montaje. startedRef evita el doble disparo del
+    // StrictMode (el token es de un solo uso). Clave: NO dependemos de
+    // useSearchParams ni cancelamos el request — el replaceState de abajo cambia
+    // la URL, y si el effect dependiera de searchParams se re-dispararía y
+    // descartaría la respuesta, dejando la UI colgada en "verificando".
     if (startedRef.current) return;
     startedRef.current = true;
 
-    const token = searchParams.get('token');
+    const token = new URLSearchParams(window.location.search).get('token');
     if (!token) {
       setStatus('error');
       setMessage('Link inválido: falta el token de verificación.');
       return;
     }
 
-    // Sacamos el token de la URL apenas lo leemos: no queda en el historial del
-    // navegador ni se filtra por Referer/logs (importa en una compu compartida).
+    // Sacamos el token de la URL: no queda en el historial / Referer / logs.
     window.history.replaceState(null, '', '/verificar-email');
 
-    let cancelled = false;
-    (async () => {
-      try {
-        // apiPost usa el cliente del repo (timeout de 60s para el cold start de Render).
-        const data = await apiPost<{ message: string }>('/api/auth/verify-email', {
-          token,
-        });
-        if (cancelled) return;
+    apiPost<{ message: string }>('/api/auth/verify-email', { token })
+      .then((data) => {
         setStatus('success');
         setMessage(data?.message ?? '');
-      } catch (err) {
-        if (cancelled) return;
+      })
+      .catch((err) => {
         setStatus('error');
         setMessage(
           err instanceof ApiError
             ? err.message
             : 'No pudimos verificar tu email. Probá de nuevo en un momento.',
         );
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [searchParams]);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="bg-white rounded-lg border border-border p-6 shadow-sm text-center">
