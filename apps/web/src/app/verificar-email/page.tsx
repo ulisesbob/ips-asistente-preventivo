@@ -1,60 +1,62 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Activity, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { apiPost, ApiError } from '@/lib/api';
 
 type Status = 'verifying' | 'success' | 'error';
 
 function VerificarEmailInner() {
   const searchParams = useSearchParams();
-  const token = searchParams.get('token');
 
   const [status, setStatus] = useState<Status>('verifying');
   const [message, setMessage] = useState('');
+  const startedRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    // Evita disparar el POST dos veces (React StrictMode monta dos veces en dev y
+    // el token es de un solo uso: el 2º request lo recibiría ya consumido).
+    if (startedRef.current) return;
+    startedRef.current = true;
 
+    const token = searchParams.get('token');
     if (!token) {
       setStatus('error');
       setMessage('Link inválido: falta el token de verificación.');
       return;
     }
 
-    async function verify() {
-      try {
-        const res = await fetch('/api/auth/verify-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
-        const json: { status: 'ok' | 'error'; message: string } =
-          await res.json();
-        if (cancelled) return;
+    // Sacamos el token de la URL apenas lo leemos: no queda en el historial del
+    // navegador ni se filtra por Referer/logs (importa en una compu compartida).
+    window.history.replaceState(null, '', '/verificar-email');
 
-        if (json.status === 'ok') {
-          setStatus('success');
-          setMessage(json.message);
-        } else {
-          setStatus('error');
-          setMessage(json.message);
-        }
-      } catch {
+    let cancelled = false;
+    (async () => {
+      try {
+        // apiPost usa el cliente del repo (timeout de 60s para el cold start de Render).
+        const data = await apiPost<{ message: string }>('/api/auth/verify-email', {
+          token,
+        });
+        if (cancelled) return;
+        setStatus('success');
+        setMessage(data?.message ?? '');
+      } catch (err) {
         if (cancelled) return;
         setStatus('error');
         setMessage(
-          'No pudimos verificar tu email. Probá de nuevo en un momento.',
+          err instanceof ApiError
+            ? err.message
+            : 'No pudimos verificar tu email. Probá de nuevo en un momento.',
         );
       }
-    }
+    })();
 
-    verify();
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [searchParams]);
 
   return (
     <div className="bg-white rounded-lg border border-border p-6 shadow-sm text-center">
@@ -92,7 +94,7 @@ function VerificarEmailInner() {
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-100 text-destructive mb-4">
             <XCircle className="w-6 h-6" />
           </div>
-          <p className="text-sm text-foreground mb-1">
+          <p className="text-sm text-foreground mb-1" role="alert">
             No pudimos verificar tu email.
           </p>
           {message && (

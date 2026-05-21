@@ -123,9 +123,11 @@ router.post(
 
     await registrationService.verifyEmail(token);
 
+    // Mismo shape que /register ({status:'ok', data:{message}}) para que el
+    // frontend use el cliente HTTP estándar (apiPost) de forma consistente.
     res.status(200).json({
       status: 'ok',
-      message: 'Email verificado. Ya podés iniciar sesión.',
+      data: { message: 'Email verificado. Ya podés iniciar sesión.' },
     });
   })
 );

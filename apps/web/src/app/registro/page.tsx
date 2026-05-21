@@ -45,7 +45,7 @@ export default function RegistroPage() {
         email: email.trim(),
         password,
       });
-      setSuccessMessage(data.message);
+      setSuccessMessage(data?.message ?? 'Cuenta creada. Revisá tu correo para verificar tu email.');
     } catch (err) {
       if (err instanceof ApiError) {
         // 400 de validación puede traer errors por campo en el body.
@@ -116,10 +116,11 @@ export default function RegistroPage() {
                   placeholder="Dra. María Pérez"
                   required
                   autoFocus
+                  autoComplete="name"
                   className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
                 />
                 {fieldErrors.fullName && (
-                  <p className="text-xs text-destructive mt-1">
+                  <p className="text-xs text-destructive mt-1" role="alert">
                     {fieldErrors.fullName.join(' ')}
                   </p>
                 )}
@@ -139,10 +140,11 @@ export default function RegistroPage() {
                   onChange={(e) => setLicenseNumber(e.target.value)}
                   placeholder="MP 12345"
                   required
+                  autoComplete="off"
                   className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
                 />
                 {fieldErrors.licenseNumber && (
-                  <p className="text-xs text-destructive mt-1">
+                  <p className="text-xs text-destructive mt-1" role="alert">
                     {fieldErrors.licenseNumber.join(' ')}
                   </p>
                 )}
@@ -162,13 +164,14 @@ export default function RegistroPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="doctor@ips.gob.ar"
                   required
+                  autoComplete="email"
                   className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
                 />
                 <p className="text-xs text-muted-foreground mt-1">
                   Usá tu email institucional de IPS.
                 </p>
                 {fieldErrors.email && (
-                  <p className="text-xs text-destructive mt-1">
+                  <p className="text-xs text-destructive mt-1" role="alert">
                     {fieldErrors.email.join(' ')}
                   </p>
                 )}
@@ -189,19 +192,24 @@ export default function RegistroPage() {
                   placeholder="********"
                   required
                   minLength={8}
+                  autoComplete="new-password"
                   className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
                 />
                 <p className="text-xs text-muted-foreground mt-1">
                   Mínimo 8 caracteres.
                 </p>
                 {fieldErrors.password && (
-                  <p className="text-xs text-destructive mt-1">
+                  <p className="text-xs text-destructive mt-1" role="alert">
                     {fieldErrors.password.join(' ')}
                   </p>
                 )}
               </div>
 
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && (
+                <p className="text-sm text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
 
               <button
                 type="submit"
