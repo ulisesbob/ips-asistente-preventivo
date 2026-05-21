@@ -38,6 +38,14 @@ enum PatientProgramStatus {
   COMPLETED
 }
 
+// Origen de una inscripción a programa. DOCTOR = la creó un médico/admin desde el
+// panel (validada). BOT = autoinscripción del paciente por WhatsApp (fase 2): NO
+// está validada clínicamente y queda marcada para revisión del equipo (reviewedAt).
+enum EnrolledVia {
+  DOCTOR
+  BOT
+}
+
 enum ReminderStatus {
   PENDING
   SENT
@@ -197,7 +205,15 @@ model PatientProgram {
   patientId          String               @db.Uuid
   programId          String               @db.Uuid
   enrolledAt         DateTime             @default(now()) @db.Timestamptz()
-  enrolledByDoctorId String               @db.Uuid
+  // Nullable: la autoinscripción por bot (fase 2) no tiene médico. Las inscripciones
+  // del panel siempre llevan el médico que las creó.
+  enrolledByDoctorId String?              @db.Uuid
+  // Origen de la inscripción (panel vs. bot). Default DOCTOR: todas las existentes
+  // y las del panel. El bot setea BOT.
+  enrolledVia        EnrolledVia          @default(DOCTOR)
+  // Validación del equipo para autoinscripciones del bot. null = pendiente de
+  // revisión; con fecha = un profesional ya la revisó. Las del panel no la usan.
+  reviewedAt         DateTime?            @db.Timestamptz()
   lastControlDate    DateTime?            @db.Date
   nextReminderDate   DateTime             @db.Date
   status             PatientProgramStatus @default(ACTIVE)
@@ -205,7 +221,7 @@ model PatientProgram {
 
   patient          Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
   program          Program  @relation(fields: [programId], references: [id], onDelete: Restrict)
-  enrolledByDoctor Doctor   @relation(fields: [enrolledByDoctorId], references: [id], onDelete: Restrict)
+  enrolledByDoctor Doctor?  @relation(fields: [enrolledByDoctorId], references: [id], onDelete: Restrict)
   surveys          Survey[]
 
   @@unique([patientId, programId])
@@ -213,6 +229,8 @@ model PatientProgram {
   @@index([programId])
   @@index([enrolledByDoctorId])
   @@index([status, nextReminderDate])
+  // Cola de revisión del equipo: autoinscripciones del bot sin revisar.
+  @@index([enrolledVia, reviewedAt])
   @@map("patient_programs")
 }
 

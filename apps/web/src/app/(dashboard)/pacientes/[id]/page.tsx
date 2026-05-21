@@ -55,7 +55,11 @@ interface PatientProgram {
   nextReminderDate: string;
   status: 'ACTIVE' | 'PAUSED' | 'COMPLETED';
   program: { id: string; name: string; reminderFrequencyDays: number };
-  enrolledByDoctor: { fullName: string };
+  // Nullable: las autoinscripciones por bot (fase 2) no tienen médico.
+  enrolledByDoctor: { fullName: string } | null;
+  // Origen + estado de revisión de la inscripción (fase 2).
+  enrolledVia: 'DOCTOR' | 'BOT';
+  reviewedAt: string | null;
 }
 
 interface Reminder {
@@ -767,12 +771,21 @@ export default function PatientDetailPage() {
               return (
                 <div key={pp.id} className="px-5 py-4">
                   <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-foreground">{pp.program.name}</span>
                       <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border ${sc.className}`}>
                         <sc.icon className="w-3 h-3" />
                         {sc.label}
                       </span>
+                      {pp.enrolledVia === 'BOT' && !pp.reviewedAt && (
+                        <span
+                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-700"
+                          title="El paciente se autoinscribió por WhatsApp. Validá la inscripción y, si corresponde, marcá un control."
+                        >
+                          <AlertCircle className="w-3 h-3" />
+                          Autoinscripción por bot · revisar
+                        </span>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       {pp.status !== 'COMPLETED' && (

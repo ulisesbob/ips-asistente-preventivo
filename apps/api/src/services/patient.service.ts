@@ -199,6 +199,9 @@ export async function getPatientById(patientId: string, doctorId: string, role: 
             select: { fullName: true },
           },
         },
+        // enrolledVia + reviewedAt: para que el panel marque las autoinscripciones
+        // del bot pendientes de revisión del equipo (fase 2). include + select de
+        // escalares juntos no se permite, así que estos campos vienen por defecto.
         orderBy: { enrolledAt: 'desc' },
       },
       reminders: {
