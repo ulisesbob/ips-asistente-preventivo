@@ -3,6 +3,7 @@ import {
   parseSelfReminderTag,
   parseListRemindersTag,
   parseCancelReminderTag,
+  parseCancelAllRemindersTag,
   formatRemindersForWhatsApp,
 } from '../services/self-reminder.service';
 
@@ -110,30 +111,87 @@ describe('parseCancelReminderTag', () => {
     const response = 'Listo, lo cancelo.\n<<CANCEL_REMINDER:2>>';
     const result = parseCancelReminderTag(response);
     expect(result.found).toBe(true);
-    expect(result.index).toBe(2);
+    expect(result.indices).toEqual([2]);
     expect(result.cleanResponse).toBe('Listo, lo cancelo.');
   });
 
   it('handles single digit', () => {
     const result = parseCancelReminderTag('OK <<CANCEL_REMINDER:1>>');
-    expect(result.index).toBe(1);
+    expect(result.indices).toEqual([1]);
   });
 
   it('handles double digit', () => {
     const result = parseCancelReminderTag('<<CANCEL_REMINDER:10>>');
-    expect(result.index).toBe(10);
+    expect(result.indices).toEqual([10]);
   });
 
   it('returns found=false when no tag', () => {
     const result = parseCancelReminderTag('No hay tag acá');
     expect(result.found).toBe(false);
-    expect(result.index).toBeUndefined();
+    expect(result.indices).toBeUndefined();
   });
 
   it('parses index 0 (boundary — validation is upstream)', () => {
     const result = parseCancelReminderTag('<<CANCEL_REMINDER:0>>');
     expect(result.found).toBe(true);
-    expect(result.index).toBe(0);
+    expect(result.indices).toEqual([0]);
+  });
+
+  // ── Multiple indices (nuevo: <<CANCEL_REMINDER:1,2,3>>) ──────────────────
+  it('parses multiple comma-separated indices', () => {
+    const result = parseCancelReminderTag('Listo.\n<<CANCEL_REMINDER:1,2,3>>');
+    expect(result.found).toBe(true);
+    expect(result.indices).toEqual([1, 2, 3]);
+    expect(result.cleanResponse).toBe('Listo.');
+  });
+
+  it('parses two indices with spaces', () => {
+    const result = parseCancelReminderTag('<<CANCEL_REMINDER:2, 5>>');
+    expect(result.found).toBe(true);
+    expect(result.indices).toEqual([2, 5]);
+  });
+
+  it('dedupes repeated indices', () => {
+    const result = parseCancelReminderTag('<<CANCEL_REMINDER:1,1,2>>');
+    expect(result.indices).toEqual([1, 2]);
+  });
+
+  it('strips the tag from the response (no leak)', () => {
+    const result = parseCancelReminderTag('OK <<CANCEL_REMINDER:1,2>> listo');
+    expect(result.cleanResponse).not.toContain('CANCEL_REMINDER');
+  });
+});
+
+// ─── parseCancelAllRemindersTag ──────────────────────────────────────────────
+
+describe('parseCancelAllRemindersTag', () => {
+  it('detects CANCEL_ALL_REMINDERS tag', () => {
+    const response = 'Listo, cancelo todos.\n<<CANCEL_ALL_REMINDERS>>';
+    const result = parseCancelAllRemindersTag(response);
+    expect(result.found).toBe(true);
+    expect(result.cleanResponse).toBe('Listo, cancelo todos.');
+  });
+
+  it('returns found=false when no tag', () => {
+    const result = parseCancelAllRemindersTag('Mensaje normal');
+    expect(result.found).toBe(false);
+    expect(result.cleanResponse).toBe('Mensaje normal');
+  });
+
+  it('strips all occurrences (no leak)', () => {
+    const response = 'A <<CANCEL_ALL_REMINDERS>> B <<CANCEL_ALL_REMINDERS>>';
+    const result = parseCancelAllRemindersTag(response);
+    expect(result.found).toBe(true);
+    expect(result.cleanResponse).not.toContain('CANCEL_ALL_REMINDERS');
+  });
+
+  it('is stable across repeated calls (no stateful regex bug)', () => {
+    const response = 'X <<CANCEL_ALL_REMINDERS>>';
+    const r1 = parseCancelAllRemindersTag(response);
+    const r2 = parseCancelAllRemindersTag(response);
+    expect(r1.found).toBe(true);
+    expect(r2.found).toBe(true);
+    expect(r1.cleanResponse).toBe(r2.cleanResponse);
   });
 });
 
@@ -243,7 +301,7 @@ describe('Multi-tag strip-all (audit #22)', () => {
     const response = 'OK <<CANCEL_REMINDER:2>>\nY también <<CANCEL_REMINDER:5>>';
     const result = parseCancelReminderTag(response);
     expect(result.found).toBe(true);
-    expect(result.index).toBe(2);
+    expect(result.indices).toEqual([2]);
     expect(result.cleanResponse).not.toContain('CANCEL_REMINDER');
   });
 
