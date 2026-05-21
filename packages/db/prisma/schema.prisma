@@ -327,6 +327,13 @@ model MedicationReminder {
   reminderHour   Int      @db.SmallInt
   reminderMinute Int      @default(0) @db.SmallInt
   active         Boolean  @default(true)
+  // Duración del tratamiento (null = continuo/crónico). El cron deja de mandar y
+  // auto-desactiva cuando endDate queda en el pasado (ver sendMedicationReminders).
+  endDate        DateTime? @db.Date
+  // Indicaciones del médico (ej. "tomar con comida"). El bot las reenvía LITERAL.
+  instructions   String?
+  // Efectos secundarios validados por el médico. NUNCA los genera la IA (ley 25.326).
+  sideEffects    String?
   createdAt      DateTime @default(now()) @db.Timestamptz()
 
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)

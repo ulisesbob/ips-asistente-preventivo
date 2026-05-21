@@ -11,6 +11,9 @@ export interface CreateMedReminderInput {
   dosage: string;
   reminderHour: number;
   reminderMinute?: number;
+  durationDays?: number;
+  instructions?: string;
+  sideEffects?: string;
 }
 
 export interface UpdateMedReminderInput {
@@ -19,6 +22,29 @@ export interface UpdateMedReminderInput {
   reminderHour?: number;
   reminderMinute?: number;
   active?: boolean;
+  durationDays?: number | null;
+  instructions?: string | null;
+  sideEffects?: string | null;
+}
+
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Medianoche UTC de hoy. Force UTC midnight para evitar shift de timezone
+ * (LESSONS #11/#44; Railway corre en UTC, Argentina es UTC-3).
+ */
+function todayUtcMidnight(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/**
+ * Convierte durationDays a endDate = medianoche UTC de (hoy + durationDays).
+ */
+function durationDaysToEndDate(durationDays: number): Date {
+  const endDate = todayUtcMidnight();
+  endDate.setUTCDate(endDate.getUTCDate() + durationDays);
+  return endDate;
 }
 
 // ─── Access check ───────────────────────────────────────────────────────────
@@ -53,6 +79,9 @@ export async function listMedReminders(patientId: string, doctorId: string, role
       reminderHour: true,
       reminderMinute: true,
       active: true,
+      endDate: true,
+      instructions: true,
+      sideEffects: true,
       doctor: { select: { fullName: true } },
     },
   });
@@ -80,6 +109,10 @@ export async function createMedReminder(
       dosage: input.dosage.trim(),
       reminderHour: input.reminderHour,
       reminderMinute: input.reminderMinute ?? 0,
+      // Ausente = tratamiento continuo/crónico (endDate null)
+      endDate: input.durationDays !== undefined ? durationDaysToEndDate(input.durationDays) : null,
+      instructions: input.instructions?.trim() || null,
+      sideEffects: input.sideEffects?.trim() || null,
     },
     select: {
       id: true,
@@ -88,6 +121,9 @@ export async function createMedReminder(
       reminderHour: true,
       reminderMinute: true,
       active: true,
+      endDate: true,
+      instructions: true,
+      sideEffects: true,
     },
   });
 }
@@ -115,6 +151,16 @@ export async function updateMedReminder(id: string, doctorId: string, role: Role
       ...(input.reminderHour !== undefined ? { reminderHour: input.reminderHour } : {}),
       ...(input.reminderMinute !== undefined ? { reminderMinute: input.reminderMinute } : {}),
       ...(input.active !== undefined ? { active: input.active } : {}),
+      // durationDays presente: null => volver a continuo (endDate null); número => recalcular endDate
+      ...(input.durationDays !== undefined
+        ? { endDate: input.durationDays === null ? null : durationDaysToEndDate(input.durationDays) }
+        : {}),
+      ...(input.instructions !== undefined
+        ? { instructions: input.instructions === null ? null : input.instructions.trim() || null }
+        : {}),
+      ...(input.sideEffects !== undefined
+        ? { sideEffects: input.sideEffects === null ? null : input.sideEffects.trim() || null }
+        : {}),
     },
     select: {
       id: true,
@@ -123,6 +169,9 @@ export async function updateMedReminder(id: string, doctorId: string, role: Role
       reminderHour: true,
       reminderMinute: true,
       active: true,
+      endDate: true,
+      instructions: true,
+      sideEffects: true,
     },
   });
 }
@@ -148,7 +197,14 @@ export async function createMedReminderFromBot(
   dosage: string,
   reminderHour: number,
   reminderMinute: number
-): Promise<{ id: string; medicationName: string; reminderHour: number; reminderMinute: number }> {
+): Promise<{
+  id: string;
+  medicationName: string;
+  reminderHour: number;
+  reminderMinute: number;
+  endDate: Date | null;
+  instructions: string | null;
+}> {
   if (reminderHour < 0 || reminderHour > 23) {
     throw new ValidationError('La hora debe ser entre 0 y 23');
   }
@@ -169,12 +225,18 @@ export async function createMedReminderFromBot(
       dosage: dosage.trim().replace(/[<>]/g, ''),
       reminderHour,
       reminderMinute,
+      // El bot no maneja duración/efectos secundarios → tratamiento continuo
+      endDate: null,
+      instructions: null,
+      sideEffects: null,
     },
     select: {
       id: true,
       medicationName: true,
       reminderHour: true,
       reminderMinute: true,
+      endDate: true,
+      instructions: true,
     },
   });
 }
@@ -195,6 +257,9 @@ export async function getMedicationsForBot(patientId: string) {
       dosage: true,
       reminderHour: true,
       reminderMinute: true,
+      // NOTA: a propósito NO se traen instructions ni sideEffects acá. El bot del
+      // chat no debe recitar efectos secundarios (decisión clínica/ley 25.326);
+      // las instrucciones ya se reenvían en el recordatorio diario del cron.
     },
   });
 }
@@ -217,6 +282,17 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
 
   console.log(`[MedReminder] Checking for hour=${argHour} minute=${slot} (Argentina)`);
 
+  // Desactivar tratamientos vencidos (endDate < hoy medianoche UTC) antes de
+  // seleccionar el slot, así no se manda ningún recordatorio caducado.
+  const today = todayUtcMidnight();
+  const deactivated = await prisma.medicationReminder.updateMany({
+    where: { active: true, endDate: { lt: today } },
+    data: { active: false },
+  });
+  if (deactivated.count > 0) {
+    console.log(`[MedReminder] Deactivated ${deactivated.count} expired reminders.`);
+  }
+
   const reminders = await prisma.medicationReminder.findMany({
     where: {
       active: true,
@@ -226,12 +302,15 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
         consent: true,
         phone: { not: null },
       },
+      // Tratamiento continuo (endDate null) o aún vigente (endDate >= hoy)
+      AND: [{ OR: [{ endDate: null }, { endDate: { gte: today } }] }],
     },
     take: 200, // LESSONS #13
     select: {
       id: true,
       medicationName: true,
       dosage: true,
+      instructions: true,
       patient: {
         select: {
           fullName: true,
@@ -253,9 +332,11 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
     if (!r.patient.phone) continue;
     const sendPhone = toMetaSendablePhone(r.patient.phone);
 
+    const instructionsLine = r.instructions ? `📋 ${r.instructions}\n\n` : '';
     const message =
       `Hola ${firstName(r.patient.fullName)}! Te recuerdo que es hora de tomar tu medicación:\n\n` +
       `💊 *${r.medicationName}* — ${r.dosage}\n\n` +
+      instructionsLine +
       `¡Cuidá tu salud!`;
 
     try {
