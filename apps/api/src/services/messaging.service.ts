@@ -11,6 +11,12 @@ import { toE164WithPlus } from '../utils/phone';
  * for Argentina mobile). El wrapper re-normaliza a E.164 con "+" para Twilio.
  */
 export async function sendTextMessage(phone: string, text: string): Promise<boolean> {
+  // Test de carga (Bloque B): cortocircuito ANTES de rutear a cualquier provider.
+  // Devuelve true sin mandar nada — el harness de 40k ejercita cola + limiter +
+  // idempotencia sin envíos reales ni costo Twilio. Inerte en prod (default false).
+  if (config.MOCK_TWILIO) {
+    return true;
+  }
   if (config.MESSAGING_PROVIDER === 'twilio') {
     return sendTwilioTextMessage(toE164WithPlus(phone), text);
   }

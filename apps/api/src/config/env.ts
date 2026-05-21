@@ -76,6 +76,12 @@ const envSchema = z.object({
   // Rate-limit de envío (Bottleneck). Arrancar conservador (< tier Twilio).
   SEND_RATE_PER_SEC: z.coerce.number().default(40),
   SEND_MAX_CONCURRENT: z.coerce.number().default(20),
+
+  // Test de carga (Bloque B): con MOCK_TWILIO=true, sendTextMessage cortocircuita
+  // y devuelve true SIN tocar ningún provider (ni Twilio ni Meta). Permite correr
+  // el seed de 40k + drenar la cola sin mandar mensajes reales (ni costo). SOLO
+  // para staging/load-test — en prod queda en false (default).
+  MOCK_TWILIO: boolFlag,
 });
 
 const parsed = envSchema.safeParse(process.env);
