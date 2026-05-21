@@ -146,10 +146,20 @@ export async function getConversationMessages(
     }
   }
 
-  const [messages, total] = await Promise.all([
+  // ─── Paginación estilo chat (FIX orden de mensajes) ────────────────────────
+  // CONTRATO:
+  //   - page 1 = los `limit` mensajes MÁS RECIENTES (la cola de la conversación).
+  //   - page 2 = los `limit` anteriores a esos, y así sucesivamente.
+  //   - La query usa `orderBy: createdAt 'desc'` + skip/take para tomar el bloque
+  //     correcto desde el final, pero el array `messages` se DEVUELVE en orden
+  //     CRONOLÓGICO ASCENDENTE (viejo→nuevo) dentro de cada página. Así el front
+  //     renderiza cada bloque de arriba (más viejo) hacia abajo (más nuevo) sin
+  //     revertir nada, y al "cargar más" prepende el bloque anterior tal cual.
+  //   - `pagination.pages` permite al front saber si hay más (page < pages).
+  const [messagesDesc, total] = await Promise.all([
     prisma.message.findMany({
       where: { conversationId },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
       skip: (page - 1) * limit,
       take: limit,
       select: {
@@ -161,6 +171,9 @@ export async function getConversationMessages(
     }),
     prisma.message.count({ where: { conversationId } }),
   ]);
+
+  // Revertir el bloque traído en desc → cronológico ascendente para el front.
+  const messages = messagesDesc.slice().reverse();
 
   return {
     conversation: {

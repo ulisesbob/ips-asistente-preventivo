@@ -54,8 +54,8 @@ export default function ConversacionDetallePage() {
   const [replyText, setReplyText] = useState('');
   const [replying, setReplying] = useState(false);
 
-  const fetchMessages = useCallback(async (pageNum: number, append: boolean) => {
-    if (append) {
+  const fetchMessages = useCallback(async (pageNum: number, prepend: boolean) => {
+    if (prepend) {
       setLoadingMore(true);
     } else {
       setLoading(true);
@@ -67,10 +67,24 @@ export default function ConversacionDetallePage() {
       );
       setData(result);
 
-      if (append) {
-        // API returns messages ASC by createdAt — page 2+ = newer messages, append at end
-        setAllMessages((prev) => [...prev, ...result.messages]);
+      // CONTRATO API: cada página viene en orden cronológico ASC (viejo→nuevo).
+      //   page 1 = los 50 MÁS RECIENTES. page 2 = los 50 anteriores, etc.
+      if (prepend) {
+        // "Cargar más" (scroll arriba): el bloque anterior va al INICIO,
+        // preservando la posición de scroll para que no salte la vista.
+        const el = chatRef.current;
+        const prevScrollHeight = el?.scrollHeight ?? 0;
+        const prevScrollTop = el?.scrollTop ?? 0;
+        setAllMessages((prev) => [...result.messages, ...prev]);
+        // Tras el repaint, restaurar la posición relativa (delta de altura).
+        requestAnimationFrame(() => {
+          if (chatRef.current) {
+            chatRef.current.scrollTop =
+              chatRef.current.scrollHeight - prevScrollHeight + prevScrollTop;
+          }
+        });
       } else {
+        // Carga inicial / recarga: reemplaza con los más recientes.
         setAllMessages(result.messages);
       }
     } catch {
@@ -109,6 +123,8 @@ export default function ConversacionDetallePage() {
     try {
       await apiPost(`/api/conversations/${id}/reply`, { message: replyText.trim() });
       setReplyText('');
+      // Recarga desde page 1 (los más recientes, incluido el recién enviado).
+      setPage(1);
       await fetchMessages(1, false);
       // Scroll to bottom after sending
       setTimeout(() => {
@@ -121,7 +137,8 @@ export default function ConversacionDetallePage() {
     }
   }
 
-  const hasMorePages = data ? data.pagination.page < data.pagination.pages : false;
+  // Hay más para cargar si todavía no tenemos todos los mensajes en memoria.
+  const hasMorePages = data ? allMessages.length < data.pagination.total : false;
 
   if (loading) {
     return (
@@ -230,6 +247,27 @@ export default function ConversacionDetallePage() {
           ref={chatRef}
           className="flex flex-col gap-3 p-4 max-h-[600px] overflow-y-auto"
         >
+          {/* Load more button — al inicio: carga el bloque ANTERIOR (más viejo)
+              y lo prepende, manteniendo la posición de scroll. */}
+          {hasMorePages && (
+            <div className="flex justify-center pb-2">
+              <button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground border border-input rounded-md px-3 py-1.5 hover:bg-accent transition-colors disabled:opacity-40 cursor-pointer"
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Cargando...
+                  </>
+                ) : (
+                  `Cargar mensajes anteriores (${data.pagination.total - allMessages.length} restantes)`
+                )}
+              </button>
+            </div>
+          )}
+
           {/* Messages */}
           {allMessages.length === 0 ? (
             <div className="py-12 text-center text-sm text-muted-foreground">
@@ -275,26 +313,6 @@ export default function ConversacionDetallePage() {
                 </div>
               );
             })
-          )}
-
-          {/* Load more button — loads next chronological batch */}
-          {hasMorePages && (
-            <div className="flex justify-center pt-2">
-              <button
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-                className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground border border-input rounded-md px-3 py-1.5 hover:bg-accent transition-colors disabled:opacity-40 cursor-pointer"
-              >
-                {loadingMore ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Cargando...
-                  </>
-                ) : (
-                  `Cargar más (${data.pagination.total - allMessages.length} restantes)`
-                )}
-              </button>
-            </div>
           )}
         </div>
       </div>
