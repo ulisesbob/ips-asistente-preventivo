@@ -1,5 +1,6 @@
 // app.ts — Express app setup without server start (importable in tests)
 import express from 'express';
+import * as Sentry from '@sentry/node';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -9,6 +10,7 @@ import { config } from './config/env';
 import { router } from './routes';
 import { errorHandler } from './middleware/error-handler';
 import { requestLogger } from './middleware/request-logger';
+import { auditContextMiddleware } from './middleware/audit-context';
 import { getCronStatus } from './services/reminder.service';
 
 const app = express();
@@ -110,9 +112,23 @@ app.get('/health/cron', (req, res) => {
   });
 });
 
+// ─── Audit context (trazabilidad ley 25.326) ────────────────────────────────
+// Abre el contexto de auditoría para las rutas de la API. requireAuth eleva el
+// actor al médico autenticado; el resto queda como SYSTEM.
+
+app.use(auditContextMiddleware);
+
 // ─── API Routes ───────────────────────────────────────────────────────────────
 
 app.use(router);
+
+// ─── Captura de errores en Sentry ────────────────────────────────────────────
+// Va DESPUÉS de las rutas y ANTES del handler que formatea la respuesta. Captura
+// los 5xx con contexto del request (sin PII, ver instrument.ts) y hace next(err).
+// Solo si hay DSN configurado (en tests/dev sin DSN no se monta).
+if (config.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // ─── Global Error Handler (must be last) ─────────────────────────────────────
 

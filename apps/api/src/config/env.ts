@@ -12,6 +12,15 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
+  // Cifrado en reposo de campos sensibles (prisma-field-encryption).
+  // Formato @47ng/cloak: "k1.aesgcm256.<base64>". Generar con `npx cloak generate`.
+  // CRÍTICO: si se pierde esta clave, los datos cifrados son irrecuperables.
+  // La de producción DEBE ser distinta a la de dev/test y vivir solo en el secret store.
+  PRISMA_FIELD_ENCRYPTION_KEY: z
+    .string()
+    .min(1, 'PRISMA_FIELD_ENCRYPTION_KEY es requerida (npx cloak generate)')
+    .regex(/^k1\.aesgcm256\./, 'PRISMA_FIELD_ENCRYPTION_KEY debe tener formato k1.aesgcm256.<base64>'),
+
   // Optional — Messaging provider switch (default: meta)
   MESSAGING_PROVIDER: z.enum(['meta', 'twilio']).default('meta'),
 
@@ -28,9 +37,15 @@ const envSchema = z.object({
 
   // Optional — AI (Anthropic)
   ANTHROPIC_API_KEY: z.string().optional(),
+  // Override del modelo (para pinear un snapshot con datestamp sin tocar código).
+  ANTHROPIC_MODEL: z.string().optional(),
+  ANTHROPIC_FALLBACK_MODEL: z.string().optional(),
 
   // Optional — Cron
   REMINDER_CRON: z.string().optional(),
+
+  // Optional — Observabilidad (Sentry). Sin DSN, Sentry queda desactivado.
+  SENTRY_DSN: z.string().optional(),
 
   // IPS contacto — default al 0800 oficial. Override por env para reutilizar
   // el código en otras provincias / otros clientes sin tocar texto hardcoded.

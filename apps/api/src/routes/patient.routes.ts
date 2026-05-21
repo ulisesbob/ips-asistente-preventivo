@@ -220,6 +220,27 @@ router.patch(
   })
 );
 
+// ─── DELETE /api/patients/:id — Soft delete (admin) ──────────────────────────
+// Borrado lógico: marca al paciente como borrado y pausa sus programas. Preserva
+// la historia (retención ley 25.326). Reversible reimportando/registrando el DNI.
+
+router.delete(
+  '/:id',
+  requireAuth,
+  requireAdmin,
+  validate(idParamsSchema, 'params'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params as z.infer<typeof idParamsSchema>;
+
+    await patientService.softDeletePatient(id);
+
+    res.status(200).json({
+      status: 'ok',
+      data: { id, deleted: true },
+    });
+  })
+);
+
 // ─── GET /api/patients/:id/self-reminders ───────────────────────────────────
 
 router.get(

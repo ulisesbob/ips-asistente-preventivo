@@ -5,6 +5,7 @@ vi.mock('@ips/db', () => ({
   prisma: {
     doctor: {
       findUnique: vi.fn(),
+      update: vi.fn(),
     },
   },
   Role: {
@@ -47,6 +48,7 @@ import { testDoctor, TEST_JWT_SECRET } from './helpers/fixtures';
 
 // Typed shorthand for the mock
 const mockFindUnique = prisma.doctor.findUnique as ReturnType<typeof vi.fn>;
+const mockUpdate = prisma.doctor.update as ReturnType<typeof vi.fn>;
 const mockBcryptCompare = bcrypt.compare as ReturnType<typeof vi.fn>;
 
 describe('AuthService', () => {
@@ -187,6 +189,62 @@ describe('AuthService', () => {
       const refreshToken = makeRefreshToken();
 
       await expect(authService.refreshAccessToken(refreshToken)).rejects.toThrow(UnauthorizedError);
+    });
+
+    it('throws UnauthorizedError if token version is stale (revocado por logout)', async () => {
+      mockFindUnique.mockResolvedValueOnce({
+        id: testDoctor.id,
+        email: testDoctor.email,
+        role: testDoctor.role,
+        tokenVersion: 1, // el doctor ya bumpeó su versión (hizo logout)
+      });
+
+      const refreshToken = makeRefreshToken({ tv: 0 }); // token viejo
+
+      await expect(authService.refreshAccessToken(refreshToken)).rejects.toThrow(UnauthorizedError);
+    });
+
+    it('returns access token when token version matches', async () => {
+      mockFindUnique.mockResolvedValueOnce({
+        id: testDoctor.id,
+        email: testDoctor.email,
+        role: testDoctor.role,
+        tokenVersion: 3,
+      });
+
+      const refreshToken = makeRefreshToken({ tv: 3 });
+      const newAccessToken = await authService.refreshAccessToken(refreshToken);
+      const decoded = jwt.verify(newAccessToken, TEST_JWT_SECRET) as Record<string, unknown>;
+
+      expect(decoded['tv']).toBe(3);
+      expect(decoded['type']).toBe('access');
+    });
+  });
+
+  // ─── logout (revocación de sesiones) ──────────────────────────────────────
+
+  describe('logout', () => {
+    it('incrementa tokenVersion para revocar todas las sesiones', async () => {
+      mockUpdate.mockResolvedValueOnce({});
+      const refreshToken = jwt.sign(
+        { sub: testDoctor.id, email: testDoctor.email, role: testDoctor.role, type: 'refresh', tv: 0 },
+        TEST_JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      await authService.logout(refreshToken);
+
+      expect(mockUpdate).toHaveBeenCalledWith({
+        where: { id: testDoctor.id },
+        data: { tokenVersion: { increment: 1 } },
+      });
+    });
+
+    it('es no-op si el token falta o es inválido', async () => {
+      await authService.logout(undefined);
+      await authService.logout('garbage-token');
+
+      expect(mockUpdate).not.toHaveBeenCalled();
     });
   });
 

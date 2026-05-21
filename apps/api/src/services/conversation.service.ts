@@ -3,11 +3,13 @@ import {
   ConversationStatus,
   MessageRole,
   RegisteredVia,
+  ConsentVia,
   PatientProgramStatus,
   Role,
 } from '@ips/db';
 import { sendTextMessage } from './messaging.service';
-import { generateResponse, buildSystemPrompt, ChatMessage } from './ai.service';
+import { generateResponse, buildSystemPrompt, ChatMessage, MAX_HISTORY_MESSAGES } from './ai.service';
+import { responseLeaksNotes } from '../utils/note-leak';
 import { getLatestNotesForBot } from './note.service';
 import { getRelevantKBForBot } from './knowledge.service';
 import { processSurveyResponse } from './survey.service';
@@ -445,6 +447,9 @@ async function handleRegistration(
           dni,
           phone: e164Phone,
           consent: true,
+          // Trazabilidad: alta por el bot implica consentimiento dado vía WhatsApp.
+          consentAt: new Date(),
+          consentVia: ConsentVia.BOT,
           registeredVia: RegisteredVia.BOT,
           whatsappLinked: true,
         },
@@ -657,12 +662,13 @@ async function handleChat(
     });
   }
 
-  // Get conversation history — limit to last 6 messages to avoid old prompt contamination
+  // Get conversation history. Usamos el MISMO límite que ai.service (MAX_HISTORY_MESSAGES)
+  // para no truncar más agresivo acá: antes cortaba a 6 y el bot olvidaba el contexto
+  // a mitad de conversación pese a declarar 20 (audit #29), malo para crónicos.
   const conversation = await getOrCreateConversation(e164Phone, patient.id);
   const history = await getConversationHistory(conversation.id);
 
-  // Only use recent history (3 exchanges) to prevent old response patterns from dominating
-  const recentHistory = history.slice(-6);
+  const recentHistory = history.slice(-MAX_HISTORY_MESSAGES);
 
   // Add user message to history for AI
   const messagesForAi: ChatMessage[] = [
@@ -681,18 +687,10 @@ async function handleChat(
       `Para consultas, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
   }
 
-  // Server-side defense: check if AI leaked note content (C1 security fix)
+  // Server-side defense: el bot NUNCA debe filtrar notas operativas (audit #5).
+  // Detección normalizada por acentos/puntuación/espacios (ver utils/note-leak).
   if (notes.length > 0) {
-    const leaked = notes.some((n) => {
-      const words = n.content.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
-      // Check if 3+ consecutive words from a note appear in the response
-      const responseLower = aiResponse.toLowerCase();
-      for (let i = 0; i <= words.length - 3; i++) {
-        const fragment = words.slice(i, i + 3).join(' ');
-        if (responseLower.includes(fragment)) return true;
-      }
-      return false;
-    });
+    const leaked = responseLeaksNotes(aiResponse, notes.map((n) => n.content));
     if (leaked) {
       console.warn(`[Security] AI response may contain leaked note content for patient ${maskId(patient.id)}. Replacing.`);
       aiResponse =
@@ -746,7 +744,8 @@ async function handleBaja(
 ): Promise<void> {
   await prisma.patient.update({
     where: { id: patientId },
-    data: { consent: false },
+    // Trazabilidad: registra cuándo y por qué vía el paciente revocó el consentimiento.
+    data: { consent: false, consentAt: new Date(), consentVia: ConsentVia.BOT },
   });
 
   const message =
@@ -767,7 +766,8 @@ async function handleAlta(
 ): Promise<void> {
   await prisma.patient.update({
     where: { id: patientId },
-    data: { consent: true },
+    // Trazabilidad: registra la reactivación del consentimiento vía bot.
+    data: { consent: true, consentAt: new Date(), consentVia: ConsentVia.BOT },
   });
 
   const message =

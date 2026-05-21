@@ -1,3 +1,5 @@
+// Sentry primero: la instrumentación debe engancharse antes de cargar express.
+import { Sentry } from './instrument';
 // Must be imported first to validate env vars before anything else
 import './config/env';
 
@@ -63,6 +65,10 @@ async function shutdown(signal: string): Promise<void> {
   stopSelfReminderCron();
   stopFollowupCron();
   server.close(async () => {
+    // Flush de eventos pendientes en Sentry antes de salir. Render manda SIGTERM
+    // en cada deploy; sin esto un error capturado en el último instante se pierde.
+    // Con DSN desactivado (dev/test) es no-op seguro.
+    await Sentry.close(2000);
     await prisma.$disconnect();
     logger.info('Server shut down cleanly', { event: 'server_shutdown' });
     process.exit(0);

@@ -6,9 +6,25 @@ vi.mock('@ips/db', () => ({
       findUnique: vi.fn(),
     },
   },
+  // Audit context: runWithAuditActor debe ejecutar el callback para que el
+  // middleware deje pasar el request; setAuditActor/getAuditActor son no-op aquí.
+  runWithAuditActor: (_actor: unknown, fn: () => unknown) => fn(),
+  setAuditActor: vi.fn(),
+  getAuditActor: () => ({ actorType: 'SYSTEM', actorId: null }),
   Role: {
     ADMIN: 'ADMIN',
     DOCTOR: 'DOCTOR',
+  },
+  RegisteredVia: {
+    PANEL: 'PANEL',
+    BOT: 'BOT',
+    IMPORT: 'IMPORT',
+  },
+  ConsentVia: {
+    PANEL: 'PANEL',
+    BOT: 'BOT',
+    IMPORT: 'IMPORT',
+    UNKNOWN: 'UNKNOWN',
   },
   PatientProgramStatus: {
     ACTIVE: 'ACTIVE',

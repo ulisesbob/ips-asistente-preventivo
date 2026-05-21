@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiGet } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
 import {
   Users,
@@ -15,6 +16,8 @@ import {
   MessageSquareOff,
   Star,
   ClipboardCheck,
+  UserPlus,
+  UserX,
 } from 'lucide-react';
 
 interface AlertPatient {
@@ -26,11 +29,21 @@ interface AlertPatient {
   missedReminders?: number;
 }
 
+interface NoProgramPatient {
+  id: string;
+  fullName: string;
+  dni: string;
+  daysSinceRegister: number;
+  reminderCount: number;
+}
+
 interface DashboardAlerts {
   overdueWarning: AlertPatient[];
   overdueCritical: AlertPatient[];
   noResponse: AlertPatient[];
   optedOut: AlertPatient[];
+  noProgramRecent?: NoProgramPatient[];
+  noProgramAbandoned?: NoProgramPatient[];
 }
 
 interface SurveyStats {
@@ -76,6 +89,11 @@ function StatCard({
 
 export default function DashboardPage() {
   const router = useRouter();
+  // Las listas "sin programa" exponen DNI+nombre y son solo para admin. El
+  // backend ya las manda vacías a un médico no-admin (dashboard.service.ts),
+  // pero gateamos también en el front como defensa en profundidad.
+  const { doctor } = useAuth();
+  const isAdmin = doctor?.role === 'ADMIN';
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [alerts, setAlerts] = useState<DashboardAlerts | null>(null);
   const [surveyStats, setSurveyStats] = useState<SurveyStats | null>(null);
@@ -148,7 +166,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Alerts */}
-      {alerts && (alerts.overdueCritical.length > 0 || alerts.overdueWarning.length > 0 || alerts.noResponse.length > 0 || alerts.optedOut.length > 0) && (
+      {alerts && (alerts.overdueCritical.length > 0 || alerts.overdueWarning.length > 0 || alerts.noResponse.length > 0 || alerts.optedOut.length > 0 || (isAdmin && (alerts.noProgramRecent?.length ?? 0) > 0) || (isAdmin && (alerts.noProgramAbandoned?.length ?? 0) > 0)) && (
         <div className="space-y-4">
           <h2 className="text-sm font-medium text-foreground flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-500" />
@@ -245,6 +263,62 @@ export default function DashboardPage() {
                       <span className="text-muted-foreground ml-2">— {p.programName}</span>
                     </div>
                     <span className="text-xs text-slate-500">BAJA</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Registrados sin programa — recibiendo recordatorios (admin only) */}
+          {isAdmin && alerts.noProgramRecent && alerts.noProgramRecent.length > 0 && (
+            <div className="bg-white rounded-lg border border-sky-200">
+              <div className="px-5 py-3 border-b border-sky-100 bg-sky-50/50">
+                <h3 className="text-xs font-medium text-sky-700 flex items-center gap-1.5">
+                  <UserPlus className="w-3.5 h-3.5" />
+                  Registrados por bot, sin programa ({alerts.noProgramRecent.length})
+                </h3>
+                <p className="text-[11px] text-sky-600/80 mt-0.5">
+                  Recibiendo recordatorios para acercarse al Área de Programas Especiales
+                </p>
+              </div>
+              <div className="divide-y divide-border">
+                {alerts.noProgramRecent.map((p) => (
+                  <button key={`npr-${p.id}`} onClick={() => router.push(`/pacientes/${p.id}`)} className="w-full px-5 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 cursor-pointer">
+                    <div className="text-sm">
+                      <span className="text-foreground font-medium">{p.fullName}</span>
+                      <span className="text-muted-foreground ml-2">DNI {p.dni}</span>
+                    </div>
+                    <span className="text-xs font-medium text-sky-600 tabular-nums">
+                      {p.daysSinceRegister}d · {p.reminderCount}/3 avisos
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Abandonados — 3 recordatorios sin enrolar (admin only) */}
+          {isAdmin && alerts.noProgramAbandoned && alerts.noProgramAbandoned.length > 0 && (
+            <div className="bg-white rounded-lg border border-rose-200">
+              <div className="px-5 py-3 border-b border-rose-100 bg-rose-50/50">
+                <h3 className="text-xs font-medium text-rose-700 flex items-center gap-1.5">
+                  <UserX className="w-3.5 h-3.5" />
+                  Sin programa tras 3 avisos — requieren acción ({alerts.noProgramAbandoned.length})
+                </h3>
+                <p className="text-[11px] text-rose-600/80 mt-0.5">
+                  Pacientes que se registraron por bot y no se enrolaron en ningún programa
+                </p>
+              </div>
+              <div className="divide-y divide-border">
+                {alerts.noProgramAbandoned.map((p) => (
+                  <button key={`npa-${p.id}`} onClick={() => router.push(`/pacientes/${p.id}`)} className="w-full px-5 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 cursor-pointer">
+                    <div className="text-sm">
+                      <span className="text-foreground font-medium">{p.fullName}</span>
+                      <span className="text-muted-foreground ml-2">DNI {p.dni}</span>
+                    </div>
+                    <span className="text-xs font-medium text-rose-600 tabular-nums">
+                      {p.daysSinceRegister} día{p.daysSinceRegister === 1 ? '' : 's'} sin enrolar
+                    </span>
                   </button>
                 ))}
               </div>

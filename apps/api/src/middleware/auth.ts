@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma, Role } from '@ips/db';
+import { prisma, Role, setAuditActor } from '@ips/db';
 import { config } from '../config/env';
 import { UnauthorizedError, ForbiddenError } from '../utils/errors';
 
@@ -8,6 +8,7 @@ interface JwtPayload {
   sub: string;
   email: string;
   role: Role;
+  tv?: number; // versión de sesión (audit #4); ausente en tokens legacy → 0
   iat?: number;
   exp?: number;
 }
@@ -62,11 +63,19 @@ export async function requireAuth(
         email: true,
         role: true,
         fullName: true,
+        tokenVersion: true,
       },
     });
 
     if (!doctor) {
       throw new UnauthorizedError('Usuario no encontrado');
+    }
+
+    // Revocación de sesión: un token con versión distinta a la del doctor fue
+    // invalidado por logout/cambio de password (audit #4). El `?? 0` mantiene
+    // válidos los tokens legacy (sin tv) hasta el primer logout.
+    if ((payload.tv ?? 0) !== (doctor.tokenVersion ?? 0)) {
+      throw new UnauthorizedError('Sesión expirada, iniciá sesión de nuevo');
     }
 
     req.doctor = {
@@ -75,6 +84,12 @@ export async function requireAuth(
       role: doctor.role,
       fullName: doctor.fullName,
     };
+
+    // Eleva el actor del audit log de SYSTEM al médico autenticado.
+    setAuditActor({
+      actorType: doctor.role === Role.ADMIN ? 'ADMIN' : 'DOCTOR',
+      actorId: doctor.id,
+    });
 
     next();
   } catch (err) {
