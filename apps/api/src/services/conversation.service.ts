@@ -39,6 +39,7 @@ import { NotFoundError, ValidationError } from '../utils/errors';
 const DNI_REGEX = /^[1-9]\d{5,7}$/;
 const E164_PHONE_REGEX = /^\d{7,15}$/;
 const REGISTRATION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MENU_TTL_MS = 30 * 60 * 1000; // 30 min — tras inactividad, se vuelve a mostrar el menú
 const MAX_HISTORY_FOR_DB = 20; // Align with AI service MAX_HISTORY_MESSAGES
 // If an ESCALATED conversation has no operator activity in this window, auto-reopen
 // so the patient isn't stuck waiting forever (audit #16).
@@ -76,6 +77,22 @@ const UNSUPPORTED_CONTENT_MESSAGE =
   'Por ahora solo puedo leer mensajes de *texto* 🙏. ' +
   'Escribime tu consulta por palabras y te ayudo.';
 
+// ─── Menú inicial de 3 opciones (texto numerado; Twilio no usa botones acá) ──
+const MENU_MESSAGE =
+  'Hola! Soy Ana, la asistente virtual del IPS 🏥\n\n' +
+  '¿En qué te puedo ayudar? Respondé con el *número*:\n\n' +
+  '*1* · Tengo una consulta\n' +
+  '*2* · Quiero registrarme en un programa\n' +
+  '*3* · Quiero sacar un turno';
+
+const TURNO_PLACEHOLDER_MESSAGE =
+  'La opción de *turnos* todavía no está disponible — la vamos a habilitar pronto. 🙏\n\n' +
+  'Mientras tanto puedo ayudarte con una *consulta* (1) o con *registrarte en un programa* (2). ' +
+  'Respondé 1 o 2, o escribí "menú" para volver a ver las opciones.';
+
+// Palabra para volver a ver el menú en cualquier momento.
+const MENU_KEYWORDS = ['menu', 'menú', 'opciones', 'inicio', 'volver'];
+
 // PII masking centralized in utils/pii.ts (see audit #24).
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -92,11 +109,24 @@ interface ReminderFlowState {
   createdAt: number;
 }
 
+interface MenuState {
+  // AWAITING_CHOICE: se mostró el menú, esperamos 1/2/3.
+  // IN_CONSULTA: eligió "consulta", los próximos mensajes van al chat con Ana.
+  // AWAITING_PROGRAM: eligió "registrarme", esperamos que elija un programa por número.
+  step: 'AWAITING_CHOICE' | 'IN_CONSULTA' | 'AWAITING_PROGRAM';
+  // Programas ofrecidos (ids en orden) cuando step === AWAITING_PROGRAM.
+  programIds?: string[];
+  createdAt: number;
+}
+
 // In-memory state for registration flows (keyed by phone).
 // This is safe because registration is a short-lived flow (2-3 messages).
 // If the server restarts mid-registration, the user just starts over.
 const registrationState = new Map<string, ConversationState>();
 const reminderFlowState = new Map<string, ReminderFlowState>();
+// Menú: mientras exista la entrada, el usuario ya vio el menú y está dentro de un
+// flujo (eligiendo, en consulta, o eligiendo programa). Al expirar, se re-muestra.
+const menuState = new Map<string, MenuState>();
 
 // Periodic cleanup of stale entries
 setInterval(() => {
@@ -111,6 +141,11 @@ setInterval(() => {
       reminderFlowState.delete(phone);
     }
   }
+  for (const [phone, state] of menuState.entries()) {
+    if (now - state.createdAt > MENU_TTL_MS) {
+      menuState.delete(phone);
+    }
+  }
 }, 10 * 60 * 1000); // every 10 minutes
 
 function getRegistrationState(phone: string): ConversationState | undefined {
@@ -119,6 +154,16 @@ function getRegistrationState(phone: string): ConversationState | undefined {
   if (Date.now() - state.createdAt > REGISTRATION_TTL_MS) {
     registrationState.delete(phone);
     return undefined; // treat as fresh start
+  }
+  return state;
+}
+
+function getMenuState(phone: string): MenuState | undefined {
+  const state = menuState.get(phone);
+  if (!state) return undefined;
+  if (Date.now() - state.createdAt > MENU_TTL_MS) {
+    menuState.delete(phone);
+    return undefined; // sesión expirada → se mostrará el menú de nuevo
   }
   return state;
 }
@@ -273,13 +318,222 @@ export async function handleIncomingMessage(
       return;
     }
 
-    // 9. Normal chat mode
-    await handleChat(normalizedPhone, e164Phone, patient, text);
+    // 9. Menú / chat — paciente conocido (los atajos de escalación/recordatorio
+    // ya se evaluaron arriba).
+    await routeMenuOrChat(normalizedPhone, e164Phone, patient, text);
     return;
   }
 
-  // 6. Not found → registration flow
-  await handleRegistration(normalizedPhone, e164Phone, text);
+  // Paciente DESCONOCIDO → menú (puede consultar sin registrarse) o registro.
+  await routeMenuOrChat(normalizedPhone, e164Phone, null, text);
+}
+
+// ─── Menú inicial de 3 opciones ──────────────────────────────────────────────
+
+type ChatPatient = {
+  id: string;
+  fullName: string;
+  consent: boolean;
+  programs: Array<{
+    lastControlDate: Date | null;
+    nextReminderDate: Date;
+    program: { name: string; centers: unknown; reminderFrequencyDays: number };
+  }>;
+};
+
+/**
+ * Routing común a paciente conocido y desconocido: re-mostrar menú por keyword,
+ * continuar una sesión de menú, seguir un registro en curso, o mostrar el menú al
+ * iniciar la conversación. Para el conocido, los atajos por keywords (escalación /
+ * recordatorio) ya se evaluaron en handleIncomingMessage antes de llegar acá.
+ */
+async function routeMenuOrChat(
+  normalizedPhone: string,
+  e164Phone: string,
+  patient: ChatPatient | null,
+  text: string
+): Promise<void> {
+  const t = text.toLowerCase().trim();
+
+  // "menú" / "opciones" en cualquier momento → re-mostrar el menú.
+  if (MENU_KEYWORDS.includes(t)) {
+    menuState.delete(normalizedPhone);
+    await showMenu(normalizedPhone, e164Phone, patient?.id ?? null, text);
+    return;
+  }
+
+  // Sesión de menú activa → procesar según el paso.
+  const menu = getMenuState(normalizedPhone);
+  if (menu) {
+    await handleMenuState(normalizedPhone, e164Phone, patient, text, menu);
+    return;
+  }
+
+  // Registro en curso (iniciado desde la opción "registrarme en un programa").
+  if (getRegistrationState(normalizedPhone)) {
+    await handleRegistration(normalizedPhone, e164Phone, text);
+    return;
+  }
+
+  // Inicio: el paciente CONOCIDO (que ya usa el bot para recordatorios, consultas,
+  // medicación) va directo al chat con Ana — no le imponemos el menú cada vez.
+  // El número DESCONOCIDO ve el menú de 3 opciones. Ambos pueden escribir "menú".
+  if (patient) {
+    await handleChat(normalizedPhone, e164Phone, patient, text);
+    return;
+  }
+  await showMenu(normalizedPhone, e164Phone, null, text);
+}
+
+async function showMenu(
+  normalizedPhone: string,
+  e164Phone: string,
+  patientId: string | null,
+  userText: string
+): Promise<void> {
+  const sent = await sendTextMessage(toSendablePhone(normalizedPhone), MENU_MESSAGE);
+  if (!sent) return; // no avanzamos estado si el envío falló (el paciente reintenta)
+  await saveSystemMessage(e164Phone, patientId, userText, MENU_MESSAGE);
+  menuState.set(normalizedPhone, { step: 'AWAITING_CHOICE', createdAt: Date.now() });
+}
+
+async function handleMenuState(
+  normalizedPhone: string,
+  e164Phone: string,
+  patient: ChatPatient | null,
+  text: string,
+  menu: MenuState
+): Promise<void> {
+  // Ya eligió "consulta": los mensajes siguientes van al chat con Ana.
+  if (menu.step === 'IN_CONSULTA') {
+    if (patient) {
+      await handleChat(normalizedPhone, e164Phone, patient, text);
+    } else {
+      await handleGeneralChat(normalizedPhone, e164Phone, text);
+    }
+    menuState.set(normalizedPhone, { step: 'IN_CONSULTA', createdAt: Date.now() }); // refresca TTL
+    return;
+  }
+
+  // Eligiendo un programa (opción 2 — fase 2).
+  if (menu.step === 'AWAITING_PROGRAM') {
+    await handleProgramChoice(normalizedPhone, e164Phone, patient, text, menu);
+    return;
+  }
+
+  // AWAITING_CHOICE: esperamos 1 / 2 / 3.
+  const choice = text.trim();
+
+  if (choice === '1') {
+    menuState.set(normalizedPhone, { step: 'IN_CONSULTA', createdAt: Date.now() });
+    const msg = 'Perfecto 😊. Contame tu consulta y te ayudo.';
+    await sendTextMessage(toSendablePhone(normalizedPhone), msg);
+    await saveSystemMessage(e164Phone, patient?.id ?? null, text, msg);
+    return;
+  }
+
+  if (choice === '2') {
+    await startProgramFlow(normalizedPhone, e164Phone, patient, text);
+    return;
+  }
+
+  if (choice === '3') {
+    await sendTextMessage(toSendablePhone(normalizedPhone), TURNO_PLACEHOLDER_MESSAGE);
+    await saveSystemMessage(e164Phone, patient?.id ?? null, text, TURNO_PLACEHOLDER_MESSAGE);
+    menuState.set(normalizedPhone, { step: 'AWAITING_CHOICE', createdAt: Date.now() }); // sigue eligible
+    return;
+  }
+
+  // No eligió número: si pide un humano, no lo atrapamos en el menú — escalamos.
+  const tl = text.toLowerCase();
+  if (patient && ESCALATION_KEYWORDS.some((kw) => tl.includes(kw))) {
+    menuState.delete(normalizedPhone);
+    await handleEscalation(normalizedPhone, e164Phone, patient.id, text);
+    return;
+  }
+
+  const retry =
+    'No te entendí 🤔. Respondé con un *número*:\n' +
+    '*1* consulta · *2* registrarme en un programa · *3* turno';
+  await sendTextMessage(toSendablePhone(normalizedPhone), retry);
+  await saveSystemMessage(e164Phone, patient?.id ?? null, text, retry);
+}
+
+/** Chat con Ana para un número NO registrado (consulta general, sin datos de paciente). */
+async function handleGeneralChat(
+  normalizedPhone: string,
+  e164Phone: string,
+  text: string
+): Promise<void> {
+  const kbEntries = await getRelevantKBForBot(text);
+  const systemPrompt = buildSystemPrompt({
+    fullName: '',
+    programs: [],
+    notes: [],
+    knowledgeBase: kbEntries,
+    medications: [],
+    selfReminders: [],
+  });
+
+  const conversation = await getOrCreateConversation(e164Phone, null);
+  const history = await getConversationHistory(conversation.id);
+  const messagesForAi: ChatMessage[] = [
+    ...history.slice(-MAX_HISTORY_MESSAGES),
+    { role: 'user' as const, content: text },
+  ];
+
+  let aiResponse: string;
+  try {
+    aiResponse = await generateResponse(systemPrompt, messagesForAi);
+  } catch (error) {
+    console.error('[AI] Error en chat general:', error);
+    aiResponse = 'Disculpá, tuve un problema técnico. Probá de nuevo en un momento.';
+  }
+
+  await saveMessages(e164Phone, null, text, aiResponse);
+  await sendTextMessage(toSendablePhone(normalizedPhone), aiResponse);
+}
+
+/** Opción 2 — inicia el flujo de inscripción en un programa. */
+async function startProgramFlow(
+  normalizedPhone: string,
+  e164Phone: string,
+  patient: ChatPatient | null,
+  text: string
+): Promise<void> {
+  // Número no registrado → primero lo registramos (nombre + DNI). El welcome del
+  // registro explica los próximos pasos para inscribirse en un programa.
+  if (!patient) {
+    menuState.delete(normalizedPhone);
+    await handleRegistration(normalizedPhone, e164Phone, text);
+    return;
+  }
+
+  // Paciente conocido: por ahora le damos los pasos de inscripción. (La inscripción
+  // automática por chat — listar y anotar — se agrega en la fase siguiente.)
+  const msg =
+    `Para inscribirte en un programa de salud (diabetes, hipertensión, etc.) ` +
+    `un médico del IPS tiene que evaluarte:\n` +
+    `1️⃣ Acercate al Área de Programas Especiales (Junín 177, Posadas) o a tu delegación.\n` +
+    `2️⃣ Llevá DNI + carnet de afiliado.\n\n` +
+    `¿Necesitás algo más? Escribí *menú* para volver a las opciones.`;
+  await sendTextMessage(toSendablePhone(normalizedPhone), msg);
+  await saveSystemMessage(e164Phone, patient.id, text, msg);
+  menuState.delete(normalizedPhone);
+}
+
+/** Procesa la elección de programa (fase 2 — inscripción real por chat). */
+async function handleProgramChoice(
+  normalizedPhone: string,
+  e164Phone: string,
+  patient: ChatPatient | null,
+  text: string,
+  _menu: MenuState
+): Promise<void> {
+  const msg = 'En breve vas a poder elegir el programa por acá. Por ahora escribí *menú*.';
+  await sendTextMessage(toSendablePhone(normalizedPhone), msg);
+  await saveSystemMessage(e164Phone, patient?.id ?? null, text, msg);
+  menuState.delete(normalizedPhone);
 }
 
 /**
