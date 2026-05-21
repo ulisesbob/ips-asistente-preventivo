@@ -9,10 +9,14 @@ const GRAPH_API_BASE = 'https://graph.facebook.com/v23.0';
 
 export interface IncomingMessage {
   from: string;          // Sender phone number (E.164 without +)
-  text: string;          // Message body
+  text: string;          // Message body (empty when unsupported)
   messageId: string;     // Meta message ID
   displayName: string;   // WhatsApp profile name
   timestamp: string;
+  // True when the patient sent NON-text content (audio/voice/image/video/
+  // document/sticker/location/etc.). The handler replies once with a guide
+  // message and does NOT run AI / registration on it (BUG 1).
+  isUnsupported: boolean;
 }
 
 interface WebhookEntry {
@@ -63,17 +67,35 @@ export function parseWebhookPayload(body: WebhookPayload): IncomingMessage[] {
       const contacts = value.contacts ?? [];
 
       for (const msg of value.messages) {
-        // Only process text messages for now
-        if (msg.type !== 'text' || !msg.text?.body) continue;
-
         const contact = contacts.find((c) => c.wa_id === msg.from);
+        const displayName = (contact?.profile?.name ?? '').slice(0, 100).replace(/[<>"']/g, '');
 
+        const isText = msg.type === 'text' && !!msg.text?.body;
+
+        if (isText) {
+          messages.push({
+            from: msg.from,
+            text: msg.text!.body.slice(0, 2000), // Cap message length
+            messageId: msg.id,
+            displayName,
+            timestamp: msg.timestamp,
+            isUnsupported: false,
+          });
+          continue;
+        }
+
+        // NON-text content (audio/voice/image/video/document/sticker/location/
+        // contacts/etc.). Don't drop it silently (BUG 1): surface it so the
+        // handler can reply once with a guide message. We still keep messageId
+        // for dedup. We deliberately do NOT carry any media payload — the bot
+        // only reads text.
         messages.push({
           from: msg.from,
-          text: msg.text.body.slice(0, 2000), // Cap message length
+          text: '',
           messageId: msg.id,
-          displayName: (contact?.profile?.name ?? '').slice(0, 100).replace(/[<>"']/g, ''),
+          displayName,
           timestamp: msg.timestamp,
+          isUnsupported: true,
         });
       }
     }

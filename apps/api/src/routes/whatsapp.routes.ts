@@ -125,7 +125,7 @@ whatsappRouter.post(
       (async () => {
         for (const msg of freshMessages) {
           try {
-            await handleIncomingMessage(msg.from, msg.text, msg.displayName);
+            await handleIncomingMessage(msg.from, msg.text, msg.displayName, msg.isUnsupported);
           } catch (error) {
             console.error(`[WhatsApp] Error procesando mensaje de ${maskPhone(msg.from)}:`, error);
           }

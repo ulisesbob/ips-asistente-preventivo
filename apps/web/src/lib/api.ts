@@ -75,6 +75,31 @@ async function refreshAccessToken(): Promise<string> {
 
 // ── Core fetch wrapper ─────────────────────────────────────────────────────────
 
+// Backend (Render free tier) can cold-start and take ~50s to wake up.
+// Give requests up to 60s before aborting so we don't kill a legit cold start.
+const REQUEST_TIMEOUT_MS = 60_000;
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError(
+        'El servidor está tardando en responder, probá de nuevo en un momento.',
+        408,
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function apiFetch<T>(
   url: string,
   options: RequestInit = {},
@@ -88,7 +113,7 @@ async function apiFetch<T>(
     headers['Authorization'] = `Bearer ${accessToken}`;
   }
 
-  let res = await fetch(url, {
+  let res = await fetchWithTimeout(url, {
     ...options,
     headers,
     credentials: 'include',
@@ -100,13 +125,16 @@ async function apiFetch<T>(
       const newToken = await refreshAccessToken();
       headers['Authorization'] = `Bearer ${newToken}`;
 
-      res = await fetch(url, {
+      res = await fetchWithTimeout(url, {
         ...options,
         headers,
         credentials: 'include',
       });
-    } catch {
-      // Refresh failed — throw the original 401
+    } catch (err) {
+      // Refresh failed (or timed out) — surface timeout, else original 401
+      if (err instanceof ApiError && err.statusCode === 408) {
+        throw err;
+      }
       setAccessToken(null);
       throw new ApiError('Session expired', 401);
     }

@@ -112,6 +112,7 @@ export default function PatientDetailPage() {
   const { doctor } = useAuth();
   const [patient, setPatient] = useState<PatientDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showEnroll, setShowEnroll] = useState(false);
   const [programs, setPrograms] = useState<{ id: string; name: string }[]>([]);
@@ -146,11 +147,13 @@ export default function PatientDetailPage() {
   const [notesLoadMore, setNotesLoadMore] = useState(false);
 
   const fetchPatient = useCallback(async () => {
+    setLoading(true);
     try {
       const result = await apiGet<{ patient: PatientDetail }>(`/api/patients/${id}`);
       setPatient(result.patient);
+      setFetchError(false);
     } catch {
-      // handled silently
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
@@ -400,7 +403,22 @@ export default function PatientDetailPage() {
         <button onClick={() => router.back()} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground cursor-pointer">
           <ArrowLeft className="w-4 h-4" /> Volver
         </button>
-        <p className="text-sm text-muted-foreground">Paciente no encontrado.</p>
+        {fetchError ? (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-center justify-between">
+            <p className="text-sm text-red-700 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              No se pudo cargar el paciente. Verificá tu conexión.
+            </p>
+            <button
+              onClick={() => fetchPatient()}
+              className="text-xs text-red-700 underline hover:text-red-900 cursor-pointer"
+            >
+              Reintentar
+            </button>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Paciente no encontrado.</p>
+        )}
       </div>
     );
   }

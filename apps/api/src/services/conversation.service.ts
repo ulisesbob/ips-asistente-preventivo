@@ -65,6 +65,14 @@ const REMINDER_KEYWORDS = [
 // Phone normalization centralizada en utils/phone.ts (LESSONS #40).
 import { toMetaSendablePhone as toSendablePhone } from '../utils/phone';
 
+// BUG 1: el bot quedaba mudo ante mensajes que no son texto (audio, imagen,
+// sticker, ubicación, documento). Respondemos UNA vez con esta guía cálida y
+// NO procesamos el contenido (sin IA, sin registro). El público es mayormente
+// adulto mayor, así que el tono es simple y amable.
+const UNSUPPORTED_CONTENT_MESSAGE =
+  'Por ahora solo puedo leer mensajes de *texto* 🙏. ' +
+  'Escribime tu consulta por palabras y te ayudo.';
+
 // PII masking centralized in utils/pii.ts (see audit #24).
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -117,7 +125,8 @@ function getRegistrationState(phone: string): ConversationState | undefined {
 export async function handleIncomingMessage(
   phone: string,
   text: string,
-  _displayName: string
+  _displayName: string,
+  isUnsupported = false
 ): Promise<void> {
   // Normalize phone: ensure no + prefix (Meta sends without it)
   const normalizedPhone = phone.startsWith('+') ? phone.slice(1) : phone;
@@ -130,6 +139,14 @@ export async function handleIncomingMessage(
 
   // For DB storage, use E.164 with +
   const e164Phone = `+${normalizedPhone}`;
+
+  // BUG 1: contenido NO-texto (audio/imagen/sticker/ubicación/documento). El
+  // dedup ya ocurrió en el webhook (Twilio/Meta), así que respondemos UNA sola
+  // vez con la guía y cortamos: no IA, no registro, no flujos.
+  if (isUnsupported) {
+    await handleUnsupportedMessage(normalizedPhone, e164Phone);
+    return;
+  }
 
   // 1. Check if patient exists by phone
   const patient = await prisma.patient.findUnique({
@@ -311,6 +328,57 @@ async function autoLinkPatient(
   await sendTextMessage(toSendablePhone(normalizedPhone), greeting);
 }
 
+// ─── Unsupported (non-text) content handler ──────────────────────────────────
+// BUG 1: audio/imagen/sticker/ubicación/documento. El bot quedaba mudo. Ahora
+// guía al paciente UNA vez. NO dispara IA, registro ni flujos.
+
+async function handleUnsupportedMessage(
+  normalizedPhone: string,
+  e164Phone: string
+): Promise<void> {
+  // Si hay un operador atendiendo (ESCALATED no-stale), no le pisamos la
+  // conversación con la guía automática: solo dejamos constancia del mensaje
+  // entrante. Mismo criterio que el flujo de texto cuando está escalado.
+  const activeConv = await prisma.conversation.findFirst({
+    where: { phone: e164Phone, status: ConversationStatus.ESCALATED },
+    select: {
+      id: true,
+      messages: {
+        where: { role: { in: [MessageRole.ASSISTANT, MessageRole.SYSTEM] } },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { createdAt: true },
+      },
+    },
+  });
+
+  if (activeConv) {
+    const lastNonUserMsgAt = activeConv.messages[0]?.createdAt;
+    const isStale =
+      !!lastNonUserMsgAt &&
+      Date.now() - lastNonUserMsgAt.getTime() > ESCALATION_STALE_MS;
+
+    if (!isStale) {
+      // Operador activo: registramos el mensaje no-texto sin responder.
+      await prisma.message.create({
+        data: {
+          conversationId: activeConv.id,
+          role: MessageRole.USER,
+          content: '[mensaje no-texto]',
+        },
+      });
+      return;
+    }
+    // Si está stale, caemos al envío de guía de abajo (lo reabre el flujo de
+    // texto en el próximo mensaje del paciente).
+  }
+
+  // Persist constancia + responder la guía UNA vez. El dedup del webhook ya
+  // garantiza que este mensaje entrante se procesa una sola vez.
+  await saveSystemMessage(e164Phone, null, '[mensaje no-texto]', UNSUPPORTED_CONTENT_MESSAGE);
+  await sendTextMessage(toSendablePhone(normalizedPhone), UNSUPPORTED_CONTENT_MESSAGE);
+}
+
 // ─── Registration Flow ────────────────────────────────────────────────────────
 
 async function handleRegistration(
@@ -369,7 +437,7 @@ async function handleRegistration(
     const dni = text.trim().replace(/\./g, '');
 
     if (!DNI_REGEX.test(dni)) {
-      const retry = 'El DNI debe tener 7 u 8 dígitos. Por favor, ingresá tu DNI nuevamente:';
+      const retry = 'El DNI debe tener 6 a 8 dígitos. Por favor, ingresá tu DNI nuevamente:';
       await sendTextMessage(toSendablePhone(phone), retry);
       return;
     }
