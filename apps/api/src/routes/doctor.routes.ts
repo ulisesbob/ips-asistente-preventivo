@@ -4,7 +4,7 @@ import { validate } from '../middleware/validate';
 import { requireAuth, requireAdmin } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error-handler';
 import * as doctorService from '../services/doctor.service';
-import { Role } from '@ips/db';
+import { Role, DoctorStatus } from '@ips/db';
 
 const router = Router();
 
@@ -89,6 +89,34 @@ router.patch(
       status: 'ok',
       data: { doctor },
     });
+  })
+);
+
+// ─── POST /api/doctors/:id/approve — habilitar un auto-registro ──────────────
+
+router.post(
+  '/:id/approve',
+  requireAuth,
+  requireAdmin,
+  validate(idParamsSchema, 'params'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params as z.infer<typeof idParamsSchema>;
+    const doctor = await doctorService.reviewDoctor(id, DoctorStatus.APPROVED);
+    res.status(200).json({ status: 'ok', data: { doctor } });
+  })
+);
+
+// ─── POST /api/doctors/:id/reject — rechazar un auto-registro ────────────────
+
+router.post(
+  '/:id/reject',
+  requireAuth,
+  requireAdmin,
+  validate(idParamsSchema, 'params'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params as z.infer<typeof idParamsSchema>;
+    const doctor = await doctorService.reviewDoctor(id, DoctorStatus.REJECTED);
+    res.status(200).json({ status: 'ok', data: { doctor } });
   })
 );
 

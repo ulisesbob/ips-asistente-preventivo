@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma, Role, setAuditActor } from '@ips/db';
+import { prisma, Role, DoctorStatus, setAuditActor } from '@ips/db';
 import { config } from '../config/env';
 import { UnauthorizedError, ForbiddenError } from '../utils/errors';
 
@@ -64,6 +64,7 @@ export async function requireAuth(
         role: true,
         fullName: true,
         tokenVersion: true,
+        status: true,
       },
     });
 
@@ -76,6 +77,12 @@ export async function requireAuth(
     // válidos los tokens legacy (sin tv) hasta el primer logout.
     if ((payload.tv ?? 0) !== (doctor.tokenVersion ?? 0)) {
       throw new UnauthorizedError('Sesión expirada, iniciá sesión de nuevo');
+    }
+
+    // Gate de aprobación en CADA request: si la cuenta dejó de estar APPROVED
+    // (rechazada/suspendida por un admin), pierde acceso aunque el token siga vigente.
+    if (doctor.status !== DoctorStatus.APPROVED) {
+      throw new ForbiddenError('Tu cuenta no está habilitada.');
     }
 
     req.doctor = {

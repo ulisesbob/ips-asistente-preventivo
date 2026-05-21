@@ -17,6 +17,7 @@ export const testDoctor = {
   role: 'DOCTOR' as const,
   passwordHash: TEST_PASSWORD_HASH,
   emailVerifiedAt: VERIFIED_AT,
+  status: 'APPROVED' as const,
 };
 
 export const testAdminDoctor = {
@@ -26,6 +27,7 @@ export const testAdminDoctor = {
   role: 'ADMIN' as const,
   passwordHash: TEST_PASSWORD_HASH,
   emailVerifiedAt: VERIFIED_AT,
+  status: 'APPROVED' as const,
 };
 
 // Médico que se auto-registró pero todavía NO verificó su email (no puede loguear).
@@ -36,6 +38,7 @@ export const unverifiedDoctor = {
   role: 'DOCTOR' as const,
   passwordHash: TEST_PASSWORD_HASH,
   emailVerifiedAt: null,
+  status: 'PENDING' as const,
 };
 
 // Factory de input válido para registerDoctor (overrideable por test).

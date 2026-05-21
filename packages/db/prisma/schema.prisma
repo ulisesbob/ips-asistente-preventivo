@@ -14,6 +14,12 @@ enum Role {
   DOCTOR
 }
 
+enum DoctorStatus {
+  PENDING // auto-registrado, esperando aprobación de un admin (no puede entrar)
+  APPROVED // habilitado para iniciar sesión
+  REJECTED // rechazado por un admin
+}
+
 enum Gender {
   M
   F
@@ -103,6 +109,9 @@ model Doctor {
   // (nunca el token plano), con vencimiento. Un solo uso (se limpia al verificar).
   verificationCodeHash  String?
   verificationExpiresAt DateTime? @db.Timestamptz()
+  // Aprobación por un admin: el auto-registro nace PENDING y NO puede loguear
+  // hasta APPROVED. Los médicos creados por admin / pre-existentes nacen APPROVED.
+  status DoctorStatus @default(PENDING)
 
   programs              DoctorProgram[]
   enrolledPatients      PatientProgram[]
@@ -110,6 +119,7 @@ model Doctor {
   medicationReminders   MedicationReminder[]
 
   @@index([verificationCodeHash])
+  @@index([status])
   @@map("doctors")
 }
 
