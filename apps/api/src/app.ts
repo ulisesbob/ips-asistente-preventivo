@@ -12,6 +12,9 @@ import { errorHandler } from './middleware/error-handler';
 import { requestLogger } from './middleware/request-logger';
 import { auditContextMiddleware } from './middleware/audit-context';
 import { getCronStatus } from './services/reminder.service';
+import { getBoss } from './queue/boss';
+import { getQueueDepth } from './queue/queue-depth';
+import { logger } from './utils/logger';
 
 const app = express();
 
@@ -93,7 +96,7 @@ app.get('/health/deep', async (_req, res) => {
 // ─── Cron Health (protected — requires auth token or internal header) ────────
 // Returns last cron run result. Protected because it exposes patient volume data.
 
-app.get('/health/cron', (req, res) => {
+app.get('/health/cron', async (req, res) => {
   const healthToken = process.env.HEALTH_TOKEN;
   const providedToken = req.headers['x-health-token'];
 
@@ -105,8 +108,29 @@ app.get('/health/cron', (req, res) => {
   }
 
   const cronStatus = getCronStatus();
+
+  // Bloque B (T9): profundidad de la cola por estado, SOLO si QUEUE_ENABLED.
+  // Con el flag off omitimos esta parte sin romper (prod actual no consulta
+  // pgboss). Si la consulta falla, no tumbamos el health: devolvemos el error
+  // de cola adjunto y seguimos con el status del cron.
+  let queue: Awaited<ReturnType<typeof getQueueDepth>> | { error: string } | undefined;
+  if (config.QUEUE_ENABLED) {
+    try {
+      queue = await getQueueDepth(getBoss());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('/health/cron — fallo al leer profundidad de cola', {
+        event: 'queue',
+        action: 'depth_failed',
+        error: message,
+      });
+      queue = { error: message };
+    }
+  }
+
   res.json({
     ...cronStatus,
+    ...(queue !== undefined ? { queue } : {}),
     upSince: SERVER_START_TIME,
     timestamp: new Date().toISOString(),
   });

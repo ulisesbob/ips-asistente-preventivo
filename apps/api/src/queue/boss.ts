@@ -73,14 +73,30 @@ export function startBoss(): Promise<PgBoss> {
 
 /**
  * Detiene pg-boss limpiamente y resetea el singleton para permitir un reinicio
- * posterior. `wait: true` espera a que drenen los jobs en vuelo antes de cerrar.
+ * posterior. `wait: true` (default) espera a que drenen los jobs en vuelo antes
+ * de cerrar — clave en el shutdown de Render (SIGTERM) para no cortar envíos a
+ * mitad. El arg se acepta para que el caller (index.ts) lo haga explícito.
+ *
+ * m1 (race SIGTERM rápido): si `start()` está EN VUELO cuando llega el stop
+ * (Render manda SIGTERM apenas arranca el deploy), esperamos a que ese `start()`
+ * termine ANTES de `stop()`. Sin esto, `stop()` podría correr a mitad del arranque
+ * de pg-boss (schema/migraciones) y dejarlo en un estado inconsistente. Si el
+ * `start()` en vuelo FALLA, lo absorbemos (catch) y cerramos igual: el objetivo
+ * del stop es liberar recursos, no propagar el fallo de arranque.
  */
-export async function stopBoss(): Promise<void> {
+export async function stopBoss(opts: { wait?: boolean } = { wait: true }): Promise<void> {
   if (!boss) return;
   const instance = boss;
-  // Reseteamos primero para que un start concurrente cree una instancia nueva.
+  // Capturamos la promesa de arranque en vuelo ANTES de resetear el singleton.
+  const inFlightStart = startPromise;
+  // Reseteamos para que un start concurrente cree una instancia nueva.
   boss = null;
   startPromise = null;
-  await instance.stop({ wait: true });
+  // Esperar el start() en vuelo (si lo hay) antes de cerrar. Absorbemos su error:
+  // un arranque fallido no debe impedir el cierre limpio.
+  if (inFlightStart) {
+    await inFlightStart.catch(() => undefined);
+  }
+  await instance.stop({ wait: opts.wait ?? true });
   logger.info('pg-boss detenido', { event: 'queue', action: 'stop' });
 }

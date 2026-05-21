@@ -11,6 +11,8 @@ import { startMedicationCron, stopMedicationCron } from './services/medication-c
 import { startSurveyCron, stopSurveyCron } from './services/survey-cron';
 import { startSelfReminderCron, stopSelfReminderCron } from './services/self-reminder-cron';
 import { startFollowupCron, stopFollowupCron } from './services/followup-cron';
+import { startBoss, stopBoss } from './queue/boss';
+import { registerQueueWorkers } from './queue/register-workers';
 import { logger } from './utils/logger';
 
 // ─── Server Start ─────────────────────────────────────────────────────────────
@@ -42,6 +44,28 @@ const server = app.listen(PORT, () => {
       startSurveyCron();
       startSelfReminderCron();
       startFollowupCron();
+
+      // ─── Bloque B (T7): cola pg-boss, SOLO bajo QUEUE_ENABLED ────────────────
+      // Con el master kill switch en false (default/prod actual) NO se arranca
+      // NADA de pg-boss: los crons de arriba siguen mandando in-process. Recién
+      // con QUEUE_ENABLED=true arrancamos boss + registramos los workers de las
+      // colas cuyo flag esté ON (por ahora solo followup) + dead-letter.
+      if (config.QUEUE_ENABLED) {
+        startBoss()
+          .then((boss) => registerQueueWorkers(boss))
+          .then(() => {
+            logger.info('pg-boss + workers listos', { event: 'queue', action: 'ready' });
+          })
+          .catch((err) => {
+            // No tumbamos el web service si la cola no arranca: los crons viejos
+            // (o el flag exclusivo) siguen cubriendo. Logueamos para alerta.
+            logger.error('pg-boss falló al arrancar (web service sigue arriba)', {
+              event: 'queue',
+              action: 'start_failed',
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+      }
     });
 });
 
@@ -69,6 +93,20 @@ async function shutdown(signal: string): Promise<void> {
     // en cada deploy; sin esto un error capturado en el último instante se pierde.
     // Con DSN desactivado (dev/test) es no-op seguro.
     await Sentry.close(2000);
+    // Bloque B (T14): drenar pg-boss ANTES de cerrar Prisma. `wait: true` espera
+    // a que terminen los jobs en vuelo para no cortar un envío a mitad. Solo si
+    // QUEUE_ENABLED (con el flag off, stopBoss sería no-op igual, pero evitamos
+    // tocar la cola en el camino de prod actual).
+    if (config.QUEUE_ENABLED) {
+      try {
+        await stopBoss({ wait: true });
+      } catch (err) {
+        logger.error('pg-boss falló al detenerse en el shutdown', {
+          event: 'server_shutdown',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     await prisma.$disconnect();
     logger.info('Server shut down cleanly', { event: 'server_shutdown' });
     process.exit(0);

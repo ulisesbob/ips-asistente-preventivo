@@ -76,4 +76,51 @@ describe('queue/boss — singleton', () => {
     await startBoss();
     expect(mockStart).toHaveBeenCalledTimes(2);
   });
+
+  // ─── m1: race startBoss flotante vs stopBoss (SIGTERM rápido) ────────────────
+  // Si stopBoss llega MIENTRAS start() está en vuelo (deploy/Render manda SIGTERM
+  // apenas arranca), no debe llamar stop() antes de que start() termine — eso
+  // dejaría a pg-boss cerrando a mitad de arranque. stopBoss debe esperar el
+  // start() en vuelo y recién después stop().
+  it('m1: stopBoss espera el start() en vuelo antes de stop()', async () => {
+    const order: string[] = [];
+    let resolveStart!: () => void;
+    mockStart.mockImplementation(
+      () =>
+        new Promise<void>((res) => {
+          resolveStart = () => {
+            order.push('start_done');
+            res();
+          };
+        })
+    );
+    mockStop.mockImplementation(async () => {
+      order.push('stop_called');
+    });
+
+    const { startBoss, stopBoss } = await import('../queue/boss');
+
+    // start() queda colgado (en vuelo).
+    const startP = startBoss();
+    // stopBoss llega con el start en vuelo.
+    const stopP = stopBoss();
+
+    // Liberamos el start; recién ahí stop debería avanzar.
+    resolveStart();
+    await Promise.all([startP.catch(() => undefined), stopP]);
+
+    // stop() NO debe haberse llamado antes de que el start() resolviera.
+    expect(order).toEqual(['start_done', 'stop_called']);
+    expect(mockStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('m1: stopBoss no rompe si el start() en vuelo falla (igual cierra limpio)', async () => {
+    mockStart.mockRejectedValue(new Error('boom'));
+
+    const { startBoss, stopBoss } = await import('../queue/boss');
+    const startP = startBoss();
+    // El start fallido no debe tumbar el stop.
+    await expect(stopBoss()).resolves.toBeUndefined();
+    await expect(startP).rejects.toThrow('boom');
+  });
 });
