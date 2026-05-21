@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatDate, formatDateTime, formatDateOnly } from '@/lib/utils';
@@ -126,6 +127,7 @@ export default function PatientDetailPage() {
   const [editLoading, setEditLoading] = useState(false);
   const [meds, setMeds] = useState<MedReminder[]>([]);
   const [showMedDialog, setShowMedDialog] = useState(false);
+  const [editingMedId, setEditingMedId] = useState<string | null>(null);
   const [medForm, setMedForm] = useState({
     medicationName: '',
     dosage: '',
@@ -193,8 +195,9 @@ export default function PatientDetailPage() {
       await apiPost(`/api/patients/${id}/notes`, { content: trimmed });
       setNoteContent('');
       await fetchNotes(1);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al crear nota');
+      toast.success('Nota guardada');
+    } catch {
+      toast.error('No se pudo guardar la nota');
     } finally {
       setNoteSubmitting(false);
     }
@@ -204,10 +207,13 @@ export default function PatientDetailPage() {
     try {
       const result = await apiGet<{ reminders: MedReminder[] }>(`/api/patients/${id}/medications`);
       setMeds(result.reminders);
-    } catch { /* handled */ }
+    } catch {
+      toast.error('No se pudieron cargar las medicaciones');
+    }
   }, [id]);
 
   function resetMedForm() {
+    setEditingMedId(null);
     setMedForm({
       medicationName: '',
       dosage: '',
@@ -220,34 +226,88 @@ export default function PatientDetailPage() {
     });
   }
 
-  async function handleCreateMed() {
+  function openEditMed(med: MedReminder) {
+    setEditingMedId(med.id);
+    setMedForm({
+      medicationName: med.medicationName,
+      dosage: med.dosage,
+      reminderHour: med.reminderHour,
+      reminderMinute: med.reminderMinute === 30 ? 30 : 0,
+      durationType: med.endDate ? 'dias' : 'continuo',
+      // endDate es @db.Date (medianoche UTC). Anclamos "hoy" a medianoche UTC para
+      // que los días restantes sean EXACTOS: así re-guardar sin tocar la duración
+      // NO corre la fecha de fin (el backend recalcula endDate = hoyUTC + N, y un N
+      // exacto reproduce el endDate original). Crítico: son datos clínicos.
+      durationDays: med.endDate
+        ? Math.max(
+            1,
+            Math.round(
+              (Date.parse(med.endDate) -
+                Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) /
+                86400000
+            )
+          )
+        : 30,
+      instructions: med.instructions ?? '',
+      sideEffects: med.sideEffects ?? '',
+    });
+    setShowMedDialog(true);
+  }
+
+  async function handleSaveMed() {
     if (!medForm.medicationName.trim() || !medForm.dosage.trim()) return;
     setMedSaving(true);
     try {
-      const body: {
-        medicationName: string;
-        dosage: string;
-        reminderHour: number;
-        reminderMinute: number;
-        durationDays?: number;
-        instructions?: string;
-        sideEffects?: string;
-      } = {
-        medicationName: medForm.medicationName,
-        dosage: medForm.dosage,
-        reminderHour: medForm.reminderHour,
-        reminderMinute: medForm.reminderMinute,
-      };
-      if (medForm.durationType === 'dias') body.durationDays = medForm.durationDays;
-      if (medForm.instructions.trim()) body.instructions = medForm.instructions.trim();
-      if (medForm.sideEffects.trim()) body.sideEffects = medForm.sideEffects.trim();
+      if (editingMedId) {
+        const body: {
+          medicationName: string;
+          dosage: string;
+          reminderHour: number;
+          reminderMinute: number;
+          durationDays: number | null;
+          instructions: string | null;
+          sideEffects: string | null;
+        } = {
+          medicationName: medForm.medicationName.trim(),
+          dosage: medForm.dosage.trim(),
+          reminderHour: medForm.reminderHour,
+          reminderMinute: medForm.reminderMinute,
+          durationDays: medForm.durationType === 'dias' ? medForm.durationDays : null,
+          instructions: medForm.instructions.trim() || null,
+          sideEffects: medForm.sideEffects.trim() || null,
+        };
+        await apiPatch(`/api/medication-reminders/${editingMedId}`, body);
+        setShowMedDialog(false);
+        resetMedForm();
+        await fetchMeds();
+        toast.success('Recordatorio actualizado');
+      } else {
+        const body: {
+          medicationName: string;
+          dosage: string;
+          reminderHour: number;
+          reminderMinute: number;
+          durationDays?: number;
+          instructions?: string;
+          sideEffects?: string;
+        } = {
+          medicationName: medForm.medicationName,
+          dosage: medForm.dosage,
+          reminderHour: medForm.reminderHour,
+          reminderMinute: medForm.reminderMinute,
+        };
+        if (medForm.durationType === 'dias') body.durationDays = medForm.durationDays;
+        if (medForm.instructions.trim()) body.instructions = medForm.instructions.trim();
+        if (medForm.sideEffects.trim()) body.sideEffects = medForm.sideEffects.trim();
 
-      await apiPost(`/api/patients/${id}/medications`, body);
-      setShowMedDialog(false);
-      resetMedForm();
-      await fetchMeds();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error');
+        await apiPost(`/api/patients/${id}/medications`, body);
+        setShowMedDialog(false);
+        resetMedForm();
+        await fetchMeds();
+        toast.success('Recordatorio de medicación creado');
+      }
+    } catch {
+      toast.error(editingMedId ? 'No se pudo actualizar el recordatorio' : 'No se pudo crear el recordatorio');
     } finally {
       setMedSaving(false);
     }
@@ -257,8 +317,9 @@ export default function PatientDetailPage() {
     try {
       await apiPatch(`/api/medication-reminders/${med.id}`, { active: !med.active });
       await fetchMeds();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error');
+      toast.success(med.active ? 'Recordatorio pausado' : 'Recordatorio activado');
+    } catch {
+      toast.error('No se pudo cambiar el estado del recordatorio');
     }
   }
 
@@ -267,8 +328,9 @@ export default function PatientDetailPage() {
     try {
       await apiDelete(`/api/medication-reminders/${medId}`);
       await fetchMeds();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error');
+      toast.success('Recordatorio eliminado');
+    } catch {
+      toast.error('No se pudo eliminar el recordatorio');
     }
   }
 
@@ -287,7 +349,7 @@ export default function PatientDetailPage() {
       setSelectedProgramId(available[0]?.id ?? '');
       setShowEnroll(true);
     } catch {
-      alert('Error al cargar programas');
+      toast.error('No se pudieron cargar los programas');
     }
   }
 
@@ -298,8 +360,9 @@ export default function PatientDetailPage() {
       await apiPost(`/api/patients/${id}/programs`, { programId: selectedProgramId });
       setShowEnroll(false);
       await fetchPatient();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al inscribir');
+      toast.success('Paciente inscripto en el programa');
+    } catch {
+      toast.error('No se pudo inscribir al paciente en el programa');
     } finally {
       setEnrollLoading(false);
     }
@@ -310,8 +373,9 @@ export default function PatientDetailPage() {
     try {
       await apiPost(`/api/patient-programs/${ppId}/control`, {});
       await fetchPatient();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al marcar control');
+      toast.success('Control registrado');
+    } catch {
+      toast.error('No se pudo registrar el control');
     } finally {
       setActionLoading(null);
     }
@@ -319,12 +383,16 @@ export default function PatientDetailPage() {
 
   async function handleToggleStatus(ppId: string, currentStatus: string) {
     const newStatus = currentStatus === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+    if (newStatus === 'PAUSED' && !confirm('Pausar el programa corta los recordatorios automáticos al paciente. ¿Continuar?')) {
+      return;
+    }
     setActionLoading(`status-${ppId}`);
     try {
       await apiPatch(`/api/patient-programs/${ppId}`, { status: newStatus });
       await fetchPatient();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al cambiar estado');
+      toast.success(newStatus === 'PAUSED' ? 'Programa pausado' : 'Programa reactivado');
+    } catch {
+      toast.error('No se pudo cambiar el estado del programa');
     } finally {
       setActionLoading(null);
     }
@@ -358,15 +426,16 @@ export default function PatientDetailPage() {
       if (editForm.gender !== (patient.gender || '')) body.gender = editForm.gender || undefined;
 
       if (Object.keys(body).length === 0) {
-        setShowEdit(false);
+        toast('No hay cambios para guardar');
         return;
       }
 
       await apiPatch(`/api/patients/${id}`, body);
       setShowEdit(false);
       await fetchPatient();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al guardar');
+      toast.success('Datos actualizados');
+    } catch {
+      toast.error('No se pudieron guardar los datos del paciente');
     } finally {
       setEditLoading(false);
     }
@@ -381,8 +450,9 @@ export default function PatientDetailPage() {
       });
       setEditDatePpId(null);
       await fetchPatient();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error al cambiar fecha');
+      toast.success('Fecha de próximo control actualizada');
+    } catch {
+      toast.error('No se pudo actualizar la fecha de próximo control');
     } finally {
       setEditDateLoading(false);
     }
@@ -818,7 +888,7 @@ export default function PatientDetailPage() {
             Recordatorios de medicación ({meds.length})
           </h2>
           <button
-            onClick={() => setShowMedDialog(true)}
+            onClick={() => { resetMedForm(); setShowMedDialog(true); }}
             className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" /> Agregar
@@ -855,6 +925,12 @@ export default function PatientDetailPage() {
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <button
+                    onClick={() => openEditMed(med)}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-input text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+                  >
+                    <Pencil className="w-3 h-3" /> Editar
+                  </button>
+                  <button
                     onClick={() => handleToggleMed(med)}
                     className="text-xs px-2 py-1 rounded border border-input text-muted-foreground hover:bg-accent cursor-pointer"
                   >
@@ -863,6 +939,7 @@ export default function PatientDetailPage() {
                   <button
                     onClick={() => handleDeleteMed(med.id)}
                     className="p-1 rounded text-red-500 hover:bg-red-50 cursor-pointer"
+                    title="Eliminar"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -877,7 +954,7 @@ export default function PatientDetailPage() {
       {showMedDialog && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg border border-border p-6 w-full max-w-sm mx-4">
-            <h3 className="text-sm font-semibold text-foreground mb-4">Nuevo recordatorio de medicación</h3>
+            <h3 className="text-sm font-semibold text-foreground mb-4">{editingMedId ? 'Editar recordatorio de medicación' : 'Nuevo recordatorio de medicación'}</h3>
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-muted-foreground mb-1">Medicamento</label>
@@ -984,11 +1061,11 @@ export default function PatientDetailPage() {
                 Cancelar
               </button>
               <button
-                onClick={handleCreateMed}
+                onClick={handleSaveMed}
                 disabled={medSaving || !medForm.medicationName.trim() || !medForm.dosage.trim()}
                 className="text-xs px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
               >
-                {medSaving ? 'Guardando...' : 'Guardar'}
+                {medSaving ? 'Guardando...' : editingMedId ? 'Guardar cambios' : 'Crear recordatorio'}
               </button>
             </div>
           </div>
@@ -1087,7 +1164,19 @@ export default function PatientDetailPage() {
           </div>
           <div className="divide-y divide-border">
             {patient.conversations.map((conv) => (
-              <div key={conv.id} className="px-5 py-3 flex items-center justify-between">
+              <div
+                key={conv.id}
+                onClick={() => router.push(`/conversaciones/${conv.id}`)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    router.push(`/conversaciones/${conv.id}`);
+                  }
+                }}
+                className="px-5 py-3 flex items-center justify-between cursor-pointer hover:bg-accent transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-inset"
+              >
                 <div className="text-sm">
                   <span className="text-foreground">{formatDateTime(conv.startedAt)}</span>
                   <span className="text-muted-foreground ml-2">
