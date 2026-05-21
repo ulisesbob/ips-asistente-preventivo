@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { formatDate, formatDateTime } from '@/lib/utils';
+import { formatDate, formatDateTime, formatDateOnly } from '@/lib/utils';
 import {
   ArrowLeft,
   Phone,
@@ -88,6 +88,9 @@ interface MedReminder {
   reminderHour: number;
   reminderMinute: number;
   active: boolean;
+  endDate: string | null;
+  instructions: string | null;
+  sideEffects: string | null;
   doctor: { fullName: string } | null;
 }
 
@@ -122,7 +125,16 @@ export default function PatientDetailPage() {
   const [editLoading, setEditLoading] = useState(false);
   const [meds, setMeds] = useState<MedReminder[]>([]);
   const [showMedDialog, setShowMedDialog] = useState(false);
-  const [medForm, setMedForm] = useState({ medicationName: '', dosage: '', reminderHour: 8, reminderMinute: 0 });
+  const [medForm, setMedForm] = useState({
+    medicationName: '',
+    dosage: '',
+    reminderHour: 8,
+    reminderMinute: 0,
+    durationType: 'continuo' as 'continuo' | 'dias',
+    durationDays: 30,
+    instructions: '',
+    sideEffects: '',
+  });
   const [medSaving, setMedSaving] = useState(false);
   const [notes, setNotes] = useState<PatientNoteItem[]>([]);
   const [notesPage, setNotesPage] = useState(1);
@@ -192,13 +204,44 @@ export default function PatientDetailPage() {
     } catch { /* handled */ }
   }, [id]);
 
+  function resetMedForm() {
+    setMedForm({
+      medicationName: '',
+      dosage: '',
+      reminderHour: 8,
+      reminderMinute: 0,
+      durationType: 'continuo',
+      durationDays: 30,
+      instructions: '',
+      sideEffects: '',
+    });
+  }
+
   async function handleCreateMed() {
     if (!medForm.medicationName.trim() || !medForm.dosage.trim()) return;
     setMedSaving(true);
     try {
-      await apiPost(`/api/patients/${id}/medications`, medForm);
+      const body: {
+        medicationName: string;
+        dosage: string;
+        reminderHour: number;
+        reminderMinute: number;
+        durationDays?: number;
+        instructions?: string;
+        sideEffects?: string;
+      } = {
+        medicationName: medForm.medicationName,
+        dosage: medForm.dosage,
+        reminderHour: medForm.reminderHour,
+        reminderMinute: medForm.reminderMinute,
+      };
+      if (medForm.durationType === 'dias') body.durationDays = medForm.durationDays;
+      if (medForm.instructions.trim()) body.instructions = medForm.instructions.trim();
+      if (medForm.sideEffects.trim()) body.sideEffects = medForm.sideEffects.trim();
+
+      await apiPost(`/api/patients/${id}/medications`, body);
       setShowMedDialog(false);
-      setMedForm({ medicationName: '', dosage: '', reminderHour: 8, reminderMinute: 0 });
+      resetMedForm();
       await fetchMeds();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Error');
@@ -770,20 +813,29 @@ export default function PatientDetailPage() {
         ) : (
           <div className="divide-y divide-border">
             {meds.map((med) => (
-              <div key={med.id} className={`px-5 py-3 flex items-center justify-between ${!med.active ? 'opacity-50' : ''}`}>
+              <div key={med.id} className={`px-5 py-3 flex items-start justify-between gap-3 ${!med.active ? 'opacity-50' : ''}`}>
                 <div>
                   <span className="text-sm font-medium text-foreground">{med.medicationName}</span>
                   <span className="text-sm text-muted-foreground ml-2">— {med.dosage}</span>
                   <span className="text-xs text-muted-foreground ml-3">
                     ⏰ {String(med.reminderHour).padStart(2, '0')}:{String(med.reminderMinute).padStart(2, '0')} hs
                   </span>
+                  <span className="text-xs text-muted-foreground ml-3">
+                    📅 {med.endDate ? `Hasta ${formatDateOnly(med.endDate)}` : 'Continuo'}
+                  </span>
                   {med.doctor ? (
                     <span className="text-xs text-muted-foreground ml-2">({med.doctor.fullName})</span>
                   ) : (
                     <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200">Creado por el paciente</span>
                   )}
+                  {med.instructions && (
+                    <p className="text-xs text-muted-foreground mt-1">📋 {med.instructions}</p>
+                  )}
+                  {med.sideEffects && (
+                    <p className="text-xs text-amber-600 mt-1">⚠️ Efectos secundarios: {med.sideEffects}</p>
+                  )}
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1 shrink-0">
                   <button
                     onClick={() => handleToggleMed(med)}
                     className="text-xs px-2 py-1 rounded border border-input text-muted-foreground hover:bg-accent cursor-pointer"
@@ -857,10 +909,58 @@ export default function PatientDetailPage() {
               <p className="text-xs text-muted-foreground">
                 El paciente recibirá un mensaje por WhatsApp todos los días a esta hora (Argentina).
               </p>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Duración</label>
+                <select
+                  value={medForm.durationType}
+                  onChange={(e) => setMedForm({ ...medForm, durationType: e.target.value as 'continuo' | 'dias' })}
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                >
+                  <option value="continuo">Continuo</option>
+                  <option value="dias">Por X días</option>
+                </select>
+                {medForm.durationType === 'dias' && (
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={medForm.durationDays}
+                    onChange={(e) => setMedForm({ ...medForm, durationDays: parseInt(e.target.value) || 1 })}
+                    placeholder="Cantidad de días (1-365)"
+                    className="w-full h-9 px-3 mt-2 rounded-md border border-input bg-background text-sm"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Instrucciones</label>
+                <textarea
+                  value={medForm.instructions}
+                  onChange={(e) => setMedForm({ ...medForm, instructions: e.target.value })}
+                  placeholder="Ej: tomar con comida, comer antes de la insulina"
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm resize-none"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  El bot se lo manda al paciente en cada recordatorio.
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Efectos secundarios</label>
+                <textarea
+                  value={medForm.sideEffects}
+                  onChange={(e) => setMedForm({ ...medForm, sideEffects: e.target.value })}
+                  placeholder="Opcional"
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm resize-none"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Solo lo que un médico haya validado.
+                </p>
+              </div>
             </div>
             <div className="flex gap-2 justify-end mt-4">
               <button
-                onClick={() => setShowMedDialog(false)}
+                onClick={() => { setShowMedDialog(false); resetMedForm(); }}
                 className="text-xs px-3 py-2 rounded-md border border-input text-muted-foreground hover:bg-accent cursor-pointer"
               >
                 Cancelar

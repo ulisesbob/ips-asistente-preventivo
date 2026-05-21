@@ -23,6 +23,10 @@ const createSchema = z.object({
   dosage: z.string().min(1, 'Dosis requerida').max(200),
   reminderHour: z.number().int().min(0).max(23),
   reminderMinute: z.union([z.literal(0), z.literal(30)]).optional().default(0),
+  // Ausente = tratamiento continuo/crónico (sin fecha de fin)
+  durationDays: z.number().int().min(1).max(365).optional(),
+  instructions: z.string().max(1000).optional(),
+  sideEffects: z.string().max(1000).optional(),
 });
 
 const updateSchema = z.object({
@@ -31,6 +35,10 @@ const updateSchema = z.object({
   reminderHour: z.number().int().min(0).max(23).optional(),
   reminderMinute: z.union([z.literal(0), z.literal(30)]).optional(),
   active: z.boolean().optional(),
+  // null explícito = volver a tratamiento continuo
+  durationDays: z.number().int().min(1).max(365).nullable().optional(),
+  instructions: z.string().max(1000).nullable().optional(),
+  sideEffects: z.string().max(1000).nullable().optional(),
 });
 
 // ─── GET /api/patients/:patientId/medications ────────────────────────────────
