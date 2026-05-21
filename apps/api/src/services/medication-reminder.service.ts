@@ -311,6 +311,7 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
       medicationName: true,
       dosage: true,
       instructions: true,
+      sideEffects: true,
       patient: {
         select: {
           fullName: true,
@@ -333,10 +334,12 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
     const sendPhone = toMetaSendablePhone(r.patient.phone);
 
     const instructionsLine = r.instructions ? `📋 ${r.instructions}\n\n` : '';
+    const sideEffectsLine = r.sideEffects ? `⚠️ Posibles efectos: ${r.sideEffects}\n\n` : '';
     const message =
       `Hola ${firstName(r.patient.fullName)}! Te recuerdo que es hora de tomar tu medicación:\n\n` +
       `💊 *${r.medicationName}* — ${r.dosage}\n\n` +
       instructionsLine +
+      sideEffectsLine +
       `¡Cuidá tu salud!`;
 
     try {

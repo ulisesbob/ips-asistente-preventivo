@@ -256,8 +256,9 @@ describe('sendMedicationReminders — endDate handling', () => {
     const hasGte = orClause.some((c: any) => c.endDate && c.endDate.gte instanceof Date);
     expect(hasNull).toBe(true);
     expect(hasGte).toBe(true);
-    // El select trae instructions
+    // El select trae instructions y sideEffects (para incluirlos en el recordatorio)
     expect(callArg.select.instructions).toBe(true);
+    expect(callArg.select.sideEffects).toBe(true);
   });
 
   it('(f) el mensaje incluye 📋 instructions cuando existe', async () => {
@@ -300,5 +301,48 @@ describe('sendMedicationReminders — endDate handling', () => {
 
     const sentMessage = mockSendTextMessage.mock.calls[0][1] as string;
     expect(sentMessage).not.toContain('📋');
+  });
+
+  it('(f) el mensaje incluye ⚠️ los efectos secundarios cuando existen', async () => {
+    mockPrisma.medicationReminder.updateMany.mockResolvedValueOnce({ count: 0 });
+    mockPrisma.medicationReminder.findMany.mockResolvedValueOnce([
+      {
+        id: 'med-3',
+        medicationName: 'Insulina',
+        dosage: '2 UI',
+        instructions: 'Tomar después de comer',
+        sideEffects: 'Puede causar diarrea',
+        patient: { fullName: 'Ulises', phone: '+5493764125878' },
+      },
+    ]);
+    mockSendTextMessage.mockResolvedValueOnce(true);
+
+    const { sendMedicationReminders } = await import('../services/medication-reminder.service');
+    await sendMedicationReminders();
+
+    const sentMessage = mockSendTextMessage.mock.calls[0][1] as string;
+    expect(sentMessage).toContain('⚠️ Posibles efectos: Puede causar diarrea');
+    expect(sentMessage).toContain('📋 Tomar después de comer');
+  });
+
+  it('(f) sin sideEffects → el mensaje NO incluye la línea ⚠️', async () => {
+    mockPrisma.medicationReminder.updateMany.mockResolvedValueOnce({ count: 0 });
+    mockPrisma.medicationReminder.findMany.mockResolvedValueOnce([
+      {
+        id: 'med-4',
+        medicationName: 'Enalapril',
+        dosage: '10mg',
+        instructions: null,
+        sideEffects: null,
+        patient: { fullName: 'Ana', phone: '+5493764125000' },
+      },
+    ]);
+    mockSendTextMessage.mockResolvedValueOnce(true);
+
+    const { sendMedicationReminders } = await import('../services/medication-reminder.service');
+    await sendMedicationReminders();
+
+    const sentMessage = mockSendTextMessage.mock.calls[0][1] as string;
+    expect(sentMessage).not.toContain('⚠️');
   });
 });
