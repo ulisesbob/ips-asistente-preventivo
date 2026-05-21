@@ -9,6 +9,7 @@ import { toMetaSendablePhone } from '../utils/phone';
 import { maskId, maskPhone } from '../utils/pii';
 import { getBoss } from '../queue/boss';
 import { limiter } from '../queue/limiter';
+import { runJobBatch } from '../queue/send-worker';
 import {
   QUEUE_NAMES,
   controlSingletonKey,
@@ -352,9 +353,10 @@ export function makeControlHandler(): (
   jobs: JobLike<ControlJobPayload>[]
 ) => Promise<void> {
   return async (jobs: JobLike<ControlJobPayload>[]): Promise<void> => {
-    for (const job of jobs) {
-      await processControlJob(job.data);
-    }
+    // Concurrencia ACOTADA (runJobBatch): pg-boss entrega lotes grandes
+    // (batchSize); procesarlos TODOS a la vez agota el pool de Prisma. El
+    // limiter (Bottleneck) gobierna el RATE de envío. Serial toparía en ~1/latencia.
+    await runJobBatch(jobs, config.SEND_MAX_CONCURRENT, (data) => processControlJob(data));
   };
 }
 

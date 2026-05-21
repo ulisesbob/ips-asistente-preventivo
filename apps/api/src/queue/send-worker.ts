@@ -27,6 +27,59 @@ export interface OutboundMessage {
 type JobLike<T> = { id: string; data: T };
 
 /**
+ * Procesa un lote de jobs con concurrencia ACOTADA (Bloque B — throughput).
+ *
+ * Por qué acotada y no `Promise.all(jobs.map(...))`: pg-boss entrega lotes grandes
+ * (`batchSize`, p.ej. 100) para amortizar el polling. Procesarlos TODOS a la vez
+ * dispara N consultas Prisma simultáneas (el guard `findFirst` de cada job) y agota
+ * el pool de conexiones → cuelga. Acotamos a `limit` "workers" que tiran de un índice
+ * compartido; el `limiter` (Bottleneck) sigue gobernando el RATE de envío (40/s).
+ *
+ * SEMÁNTICA DE FALLO (importante): pg-boss v10 falla el LOTE COMPLETO cuando el
+ * handler hace throw — `manager.js` llama `fail(name, jobIds, err)` con TODOS los
+ * jobIds del batch. Acá procesamos todos los jobs (un fallo NO corta el resto) y
+ * recién al final hacemos throw si hubo alguno → pg-boss reintenta el lote ENTERO.
+ *
+ * ⚠️ Esto es idempotente SOLO para los crons cuyo handler tiene guard de re-lectura
+ * (followup/survey/self/control re-leen estado y hacen skip en el reintento). Para
+ * MEDICACIÓN —que NO marca "enviado"— un reintento de lote RE-ENVÍA los ya enviados
+ * de ese lote (at-least-once amplificado por el batch). Ver el handler de medicación:
+ * QUEUE_MEDICATION queda gateado hasta agregarle una marca de envío idempotente.
+ */
+export async function runJobBatch<T>(
+  jobs: JobLike<T>[],
+  limit: number,
+  processOne: (data: T) => Promise<void>
+): Promise<void> {
+  let failed = 0;
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const idx = next++;
+      if (idx >= jobs.length) return;
+      try {
+        await processOne(jobs[idx].data);
+      } catch (err) {
+        failed++;
+        // Logueamos cada fallo con su jobId: el throw es agregado a nivel lote y se
+        // perdería el detalle (qué job, por qué) para el dead-letter / observabilidad.
+        logger.error('job del lote falló', {
+          event: 'queue',
+          action: 'batch_job_failed',
+          jobId: jobs[idx].id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  };
+  const workers = Math.max(1, Math.min(limit, jobs.length));
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+  if (failed > 0) {
+    throw new Error(`${failed}/${jobs.length} jobs del lote fallaron`);
+  }
+}
+
+/**
  * Construye un handler de cola reutilizable.
  *
  * @param buildMessage función PURA: payload → {phone, text}. Cada cola pasa la

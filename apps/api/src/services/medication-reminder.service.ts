@@ -8,6 +8,7 @@ import { config } from '../config/env';
 import { logger } from '../utils/logger';
 import { getBoss } from '../queue/boss';
 import { limiter } from '../queue/limiter';
+import { runJobBatch } from '../queue/send-worker';
 import {
   QUEUE_NAMES,
   medicationSingletonKey,
@@ -508,14 +509,24 @@ type JobLike<T> = { id: string; data: T };
  * Consumidor: construye el handler del worker `reminders:medication`.
  * Guard re-lee el recordatorio (active + no-vencido + consent), envía FUERA de tx.
  * NO muta estado (medicación no tiene marca de "enviado").
+ *
+ * 🚩 RELEASE-GATE (code-review C-1): NO prender QUEUE_MEDICATION hasta resolver esto.
+ * Con el procesamiento por LOTES (runJobBatch) + la semántica de pg-boss (un throw
+ * falla el lote ENTERO → reintenta los N), si UN envío del lote falla, los demás —ya
+ * enviados— se RE-ENVÍAN en el reintento, porque medicación no tiene guard contra
+ * re-envío (no marca "enviado"). Los otros 4 crons están protegidos por su guard de
+ * re-lectura; medicación no. Fix correcto: agregar `lastSentAt` (o registro de envío)
+ * a MedicationReminder + chequearlo en el guard (migración aditiva, mismo patrón que
+ * survey/self). Mientras tanto QUEUE_MEDICATION debe quedar en false.
  */
 export function makeMedicationHandler(): (
   jobs: JobLike<MedicationJobPayload>[]
 ) => Promise<void> {
   return async (jobs: JobLike<MedicationJobPayload>[]): Promise<void> => {
-    for (const job of jobs) {
-      await processMedicationJob(job.data);
-    }
+    // Concurrencia ACOTADA (runJobBatch): pg-boss entrega lotes grandes
+    // (batchSize); procesarlos TODOS a la vez agota el pool de Prisma. El
+    // limiter (Bottleneck) gobierna el RATE de envío. Serial toparía en ~1/latencia.
+    await runJobBatch(jobs, config.SEND_MAX_CONCURRENT, (data) => processMedicationJob(data));
   };
 }
 

@@ -77,6 +77,14 @@ const envSchema = z.object({
   SEND_RATE_PER_SEC: z.coerce.number().default(40),
   SEND_MAX_CONCURRENT: z.coerce.number().default(20),
 
+  // Worker pg-boss: cuántos jobs entrega por fetch (`batchSize`) y cada cuánto
+  // pollea (`pollingIntervalSeconds`). CRÍTICO para el throughput: con el default
+  // de pg-boss (batchSize 1 + polling 2s) el worker entrega 1 job cada 2s (0.5/s)
+  // y el limiter nunca llega a ser el cuello. Con batchSize >= SEND_RATE_PER_SEC,
+  // el techo de fetch supera al limiter y éste pasa a gobernar los envíos (40/s).
+  QUEUE_BATCH_SIZE: z.coerce.number().default(100),
+  QUEUE_POLL_SECONDS: z.coerce.number().default(2),
+
   // Test de carga (Bloque B): con MOCK_TWILIO=true, sendTextMessage cortocircuita
   // y devuelve true SIN tocar ningún provider (ni Twilio ni Meta). Permite correr
   // el seed de 40k + drenar la cola sin mandar mensajes reales (ni costo). SOLO

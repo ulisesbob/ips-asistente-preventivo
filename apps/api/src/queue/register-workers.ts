@@ -94,8 +94,17 @@ export async function registerQueueWorkers(boss: PgBoss): Promise<void> {
   // C1: crear las colas ANTES de cualquier work/send.
   await createQueues(boss);
 
+  // Opciones de fetch del worker (throughput): sin esto pg-boss usa batchSize 1 +
+  // polling 2s → 1 job cada 2s (0.5/s) y el limiter nunca gobierna. Con batchSize
+  // grande el techo de fetch supera al SEND_RATE_PER_SEC y el limiter pasa a ser el
+  // único throttle. El handler procesa el lote en CONCURRENTE (ver makeXHandler).
+  const workOpts = {
+    batchSize: config.QUEUE_BATCH_SIZE,
+    pollingIntervalSeconds: config.QUEUE_POLL_SECONDS,
+  };
+
   if (config.QUEUE_FOLLOWUP) {
-    await boss.work(QUEUE_NAMES.followup, makeFollowupHandler());
+    await boss.work(QUEUE_NAMES.followup, workOpts, makeFollowupHandler());
     logger.info('worker registrado', {
       event: 'queue',
       action: 'register_worker',
@@ -104,7 +113,7 @@ export async function registerQueueWorkers(boss: PgBoss): Promise<void> {
   }
 
   if (config.QUEUE_SURVEY) {
-    await boss.work(QUEUE_NAMES.survey, makeSurveyHandler());
+    await boss.work(QUEUE_NAMES.survey, workOpts, makeSurveyHandler());
     logger.info('worker registrado', {
       event: 'queue',
       action: 'register_worker',
@@ -113,7 +122,7 @@ export async function registerQueueWorkers(boss: PgBoss): Promise<void> {
   }
 
   if (config.QUEUE_MEDICATION) {
-    await boss.work(QUEUE_NAMES.medication, makeMedicationHandler());
+    await boss.work(QUEUE_NAMES.medication, workOpts, makeMedicationHandler());
     logger.info('worker registrado', {
       event: 'queue',
       action: 'register_worker',
@@ -122,7 +131,7 @@ export async function registerQueueWorkers(boss: PgBoss): Promise<void> {
   }
 
   if (config.QUEUE_SELF) {
-    await boss.work(QUEUE_NAMES.self, makeSelfReminderHandler());
+    await boss.work(QUEUE_NAMES.self, workOpts, makeSelfReminderHandler());
     logger.info('worker registrado', {
       event: 'queue',
       action: 'register_worker',
@@ -131,7 +140,7 @@ export async function registerQueueWorkers(boss: PgBoss): Promise<void> {
   }
 
   if (config.QUEUE_CONTROL) {
-    await boss.work(QUEUE_NAMES.control, makeControlHandler());
+    await boss.work(QUEUE_NAMES.control, workOpts, makeControlHandler());
     logger.info('worker registrado', {
       event: 'queue',
       action: 'register_worker',

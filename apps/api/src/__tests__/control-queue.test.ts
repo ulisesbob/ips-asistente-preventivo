@@ -32,7 +32,7 @@ const mockSchedule = vi.fn();
 let txDepth = 0;
 let sendCalledInsideTx = false;
 
-const mockConfig: { QUEUE_SHADOW: boolean } = { QUEUE_SHADOW: false };
+const mockConfig: { QUEUE_SHADOW: boolean; SEND_MAX_CONCURRENT: number } = { QUEUE_SHADOW: false, SEND_MAX_CONCURRENT: 20 };
 
 vi.mock('@ips/db', () => ({
   prisma: mockPrisma,

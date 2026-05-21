@@ -13,12 +13,16 @@ const mockConfig: {
   QUEUE_MEDICATION: boolean;
   QUEUE_SELF: boolean;
   QUEUE_CONTROL: boolean;
+  QUEUE_BATCH_SIZE: number;
+  QUEUE_POLL_SECONDS: number;
 } = {
   QUEUE_FOLLOWUP: false,
   QUEUE_SURVEY: false,
   QUEUE_MEDICATION: false,
   QUEUE_SELF: false,
   QUEUE_CONTROL: false,
+  QUEUE_BATCH_SIZE: 100,
+  QUEUE_POLL_SECONDS: 2,
 };
 const mockMakeFollowupHandler = vi.fn(() => async () => undefined);
 const mockMakeSurveyHandler = vi.fn(() => async () => undefined);
@@ -90,8 +94,12 @@ describe('registerQueueWorkers', () => {
     const followupCalls = work.mock.calls.filter((c) => c[0] === 'reminders:followup');
     expect(followupCalls).toHaveLength(1);
     expect(mockMakeFollowupHandler).toHaveBeenCalledTimes(1);
-    // El handler pasado a work() es el que devolvió makeFollowupHandler.
-    expect(typeof followupCalls[0][1]).toBe('function');
+    // work(name, options, handler): las opciones de fetch llevan batchSize (>1 para
+    // throughput) + pollingIntervalSeconds; el handler es el de makeFollowupHandler.
+    expect(followupCalls[0][1]).toMatchObject({ batchSize: expect.any(Number) });
+    expect(followupCalls[0][1].batchSize).toBeGreaterThan(1);
+    expect(followupCalls[0][1]).toHaveProperty('pollingIntervalSeconds');
+    expect(typeof followupCalls[0][2]).toBe('function');
     expect(mockRegisterDeadLetterHandler).toHaveBeenCalledTimes(1);
   });
 

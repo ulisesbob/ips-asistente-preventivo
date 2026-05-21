@@ -7,6 +7,7 @@ import { config } from '../config/env';
 import { logger } from '../utils/logger';
 import { getBoss } from '../queue/boss';
 import { limiter } from '../queue/limiter';
+import { runJobBatch } from '../queue/send-worker';
 import {
   QUEUE_NAMES,
   selfSingletonKey,
@@ -524,9 +525,10 @@ export function makeSelfReminderHandler(): (
   jobs: JobLike<SelfJobPayload>[]
 ) => Promise<void> {
   return async (jobs: JobLike<SelfJobPayload>[]): Promise<void> => {
-    for (const job of jobs) {
-      await processSelfReminderJob(job.data);
-    }
+    // Concurrencia ACOTADA (runJobBatch): pg-boss entrega lotes grandes
+    // (batchSize); procesarlos TODOS a la vez agota el pool de Prisma. El
+    // limiter (Bottleneck) gobierna el RATE de envío. Serial toparía en ~1/latencia.
+    await runJobBatch(jobs, config.SEND_MAX_CONCURRENT, (data) => processSelfReminderJob(data));
   };
 }
 

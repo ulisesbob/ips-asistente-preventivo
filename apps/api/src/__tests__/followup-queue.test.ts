@@ -33,8 +33,8 @@ let sendCalledInsideTx = false;
 
 // Flags mutables por test. config se importa del módulo real, pero lo mockeamos
 // para poder togglear QUEUE_SHADOW sin tocar process.env entre tests.
-const mockConfig: { QUEUE_SHADOW: boolean; IPS_SUPPORT_PHONE: string } = {
-  QUEUE_SHADOW: false,
+const mockConfig: { QUEUE_SHADOW: boolean; SEND_MAX_CONCURRENT: number; IPS_SUPPORT_PHONE: string } = {
+  QUEUE_SHADOW: false, SEND_MAX_CONCURRENT: 20,
   IPS_SUPPORT_PHONE: '0800-888-0109',
 };
 
