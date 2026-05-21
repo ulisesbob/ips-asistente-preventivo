@@ -47,3 +47,9 @@ export class ConflictError extends AppError {
     super(message, 409, true);
   }
 }
+
+export class ServiceUnavailableError extends AppError {
+  constructor(message = 'Servicio no disponible temporalmente') {
+    super(message, 503, true);
+  }
+}

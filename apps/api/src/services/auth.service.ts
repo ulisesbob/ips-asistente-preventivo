@@ -2,7 +2,8 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { prisma, Role } from '@ips/db';
 import { config } from '../config/env';
-import { UnauthorizedError, NotFoundError } from '../utils/errors';
+import { UnauthorizedError, NotFoundError, ForbiddenError } from '../utils/errors';
+import { normalizeEmail } from '../utils/email';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -53,8 +54,9 @@ function generateRefreshToken(payload: TokenPayload): string {
 // ─── Service methods ────────────────────────────────────────────────────────
 
 export async function login(email: string, password: string): Promise<LoginResult> {
+  // Normalizamos igual que en el alta para que el `@unique` case-sensitive matchee.
   const doctor = await prisma.doctor.findUnique({
-    where: { email },
+    where: { email: normalizeEmail(email) },
     select: {
       id: true,
       fullName: true,
@@ -62,6 +64,7 @@ export async function login(email: string, password: string): Promise<LoginResul
       role: true,
       passwordHash: true,
       tokenVersion: true,
+      emailVerifiedAt: true,
     },
   });
 
@@ -71,6 +74,15 @@ export async function login(email: string, password: string): Promise<LoginResul
 
   if (!doctor || !isValid) {
     throw new UnauthorizedError('Credenciales inválidas');
+  }
+
+  // Gate de auto-registro: sin verificar el email no se puede entrar. Se chequea
+  // DESPUÉS de validar la contraseña, así sólo se revela a quien ya tiene la
+  // credencial correcta (no sirve para enumerar emails).
+  if (!doctor.emailVerifiedAt) {
+    throw new ForbiddenError(
+      'Verificá tu email antes de iniciar sesión. Te enviamos un link cuando te registraste.'
+    );
   }
 
   const payload: TokenPayload = {

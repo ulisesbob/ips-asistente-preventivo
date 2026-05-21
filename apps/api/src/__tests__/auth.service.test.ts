@@ -43,8 +43,8 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { prisma } from '@ips/db';
 import * as authService from '../services/auth.service';
-import { UnauthorizedError, NotFoundError } from '../utils/errors';
-import { testDoctor, TEST_JWT_SECRET } from './helpers/fixtures';
+import { UnauthorizedError, NotFoundError, ForbiddenError } from '../utils/errors';
+import { testDoctor, unverifiedDoctor, TEST_JWT_SECRET } from './helpers/fixtures';
 
 // Typed shorthand for the mock
 const mockFindUnique = prisma.doctor.findUnique as ReturnType<typeof vi.fn>;
@@ -82,6 +82,33 @@ describe('AuthService', () => {
       await expect(authService.login(testDoctor.email, 'WrongPass!')).rejects.toThrow(
         UnauthorizedError
       );
+    });
+
+    it('normaliza el email (trim + lowercase) antes de buscar', async () => {
+      mockFindUnique.mockResolvedValueOnce(testDoctor);
+      mockBcryptCompare.mockResolvedValueOnce(true);
+
+      await authService.login('  MARIA.GARCIA@IPS.COM  ', 'Test1234!');
+
+      expect(mockFindUnique.mock.calls[0][0].where.email).toBe('maria.garcia@ips.com');
+    });
+
+    it('rechaza login con ForbiddenError si el email NO está verificado', async () => {
+      mockFindUnique.mockResolvedValueOnce(unverifiedDoctor);
+      mockBcryptCompare.mockResolvedValueOnce(true); // password correcta
+
+      await expect(
+        authService.login(unverifiedDoctor.email, 'Test1234!')
+      ).rejects.toThrow(ForbiddenError);
+    });
+
+    it('email no verificado + password incorrecta falla como UnauthorizedError (no revela el motivo)', async () => {
+      mockFindUnique.mockResolvedValueOnce(unverifiedDoctor);
+      mockBcryptCompare.mockResolvedValueOnce(false);
+
+      await expect(
+        authService.login(unverifiedDoctor.email, 'WrongPass!')
+      ).rejects.toThrow(UnauthorizedError);
     });
 
     it('throws UnauthorizedError on non-existent email (timing attack safe)', async () => {

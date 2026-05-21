@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import { prisma, Role, Prisma } from '@ips/db';
 import { NotFoundError, ConflictError, ValidationError } from '../utils/errors';
+import { normalizeEmail } from '../utils/email';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -59,9 +60,12 @@ export async function createDoctor(input: DoctorCreateInput) {
   const doctor = await prisma.doctor.create({
     data: {
       fullName: input.fullName,
-      email: input.email,
+      email: normalizeEmail(input.email),
       passwordHash,
       role: input.role ?? Role.DOCTOR,
+      // Alta por admin: el admin da fe de la identidad, no hay verificación por
+      // mail. Sin esto, el gate de login (auth.service) lo bloquearía para siempre.
+      emailVerifiedAt: new Date(),
     },
     select: {
       id: true,
