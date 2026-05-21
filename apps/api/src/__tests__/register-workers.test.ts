@@ -7,14 +7,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 //   - QUEUE_FOLLOWUP=false → NO registra worker de followup (solo dead-letter).
 //   - QUEUE_FOLLOWUP=true  → boss.work(reminders:followup, handler) + dead-letter.
 
-const mockConfig: { QUEUE_FOLLOWUP: boolean } = { QUEUE_FOLLOWUP: false };
+const mockConfig: { QUEUE_FOLLOWUP: boolean; QUEUE_SURVEY: boolean } = {
+  QUEUE_FOLLOWUP: false,
+  QUEUE_SURVEY: false,
+};
 const mockMakeFollowupHandler = vi.fn(() => async () => undefined);
+const mockMakeSurveyHandler = vi.fn(() => async () => undefined);
 const mockRegisterDeadLetterHandler = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../config/env', () => ({ config: mockConfig }));
 
 vi.mock('../services/patient-followup.service', () => ({
   makeFollowupHandler: mockMakeFollowupHandler,
+}));
+
+vi.mock('../services/survey.service', () => ({
+  makeSurveyHandler: mockMakeSurveyHandler,
 }));
 
 vi.mock('../queue/send-worker', () => ({
@@ -24,6 +32,7 @@ vi.mock('../queue/send-worker', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mockConfig.QUEUE_FOLLOWUP = false;
+  mockConfig.QUEUE_SURVEY = false;
 });
 
 function makeFakeBoss() {
@@ -105,6 +114,32 @@ describe('registerQueueWorkers', () => {
 
     const followupCalls = createQueue.mock.calls.filter((c) => c[0] === 'reminders:followup');
     expect(followupCalls).toHaveLength(0);
+  });
+
+  // ─── T10: Survey ────────────────────────────────────────────────────────────
+
+  it('survey OFF: NO registra worker ni crea cola de survey', async () => {
+    const { boss, work, createQueue } = makeFakeBoss();
+    const { registerQueueWorkers } = await import('../queue/register-workers');
+    await registerQueueWorkers(boss);
+
+    expect(work.mock.calls.filter((c) => c[0] === 'reminders:survey')).toHaveLength(0);
+    expect(createQueue.mock.calls.filter((c) => c[0] === 'reminders:survey')).toHaveLength(0);
+  });
+
+  it('survey ON: crea cola reminders:survey (short + deadLetter) y registra su worker', async () => {
+    mockConfig.QUEUE_SURVEY = true;
+    const { boss, work, createQueue } = makeFakeBoss();
+    const { registerQueueWorkers } = await import('../queue/register-workers');
+    await registerQueueWorkers(boss);
+
+    const createCalls = createQueue.mock.calls.filter((c) => c[0] === 'reminders:survey');
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0][1]).toMatchObject({ policy: 'short', deadLetter: 'reminders:dead' });
+
+    const workCalls = work.mock.calls.filter((c) => c[0] === 'reminders:survey');
+    expect(workCalls).toHaveLength(1);
+    expect(mockMakeSurveyHandler).toHaveBeenCalledTimes(1);
   });
 
   it('C1: createQueue de followup ocurre ANTES de work(followup)', async () => {
