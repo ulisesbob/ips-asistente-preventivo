@@ -262,7 +262,18 @@ export function buildSystemPrompt(patient?: PatientContext): SystemBlock[] {
     .replace(/[<>`\n\r]/g, ' ')
     .slice(0, 100);
 
-  return [
+  // Estructura de caching (Sonnet 4.6 cachea con mínimo 2048 tokens de prefijo):
+  //  - Bloque 1: BASE_RULES + DISCLAIMER (estable, ~1.8k tokens). Cacheado, pero por
+  //    sí solo queda por debajo del mínimo → no escribe hasta combinarse con el sig.
+  //  - Bloque 2: datos ESTABLES del paciente (nombre, programas, medicación, self-
+  //    reminders, notas). Estables DENTRO de una conversación. Cacheado: el prefijo
+  //    Bloque1+Bloque2 supera 2048 → cachea por paciente/conversación; en el 2º+
+  //    mensaje del paciente (dentro del TTL) se lee de cache (~0.1x costo).
+  //  - Bloque 3: KB relevante (DINÁMICA — getRelevantKBForBot filtra por el texto de
+  //    CADA mensaje). Va al final SIN cache_control: si estuviera en el prefijo
+  //    cacheado, cambiaría en cada mensaje e invalidaría todo el cache.
+  // Mismo texto y misma orden que antes (BASE_RULES → datos → KB): neutro para el modelo.
+  const blocks: SystemBlock[] = [
     {
       type: 'text',
       text: `${BASE_RULES}\n\n${DISCLAIMER}`,
@@ -275,10 +286,16 @@ export function buildSystemPrompt(patient?: PatientContext): SystemBlock[] {
 ${programSection}
 ${medsInfo}
 ${selfRemindersInfo}
-${notesInfo}
-${kbInfo}`,
+${notesInfo}`,
+      cache_control: { type: 'ephemeral' },
     },
   ];
+
+  if (kbInfo) {
+    blocks.push({ type: 'text', text: kbInfo });
+  }
+
+  return blocks;
 }
 
 // ─── Generate AI Response ─────────────────────────────────────────────────────
