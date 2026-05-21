@@ -3,6 +3,7 @@ import { sendTextMessage } from '../services/messaging.service';
 import { limiter } from './limiter';
 import { QUEUE_NAMES } from './queues';
 import { logger } from '../utils/logger';
+import { maskId } from '../utils/pii';
 
 /**
  * Worker genérico de envío (Bloque B).
@@ -62,14 +63,23 @@ export function makeSendHandler<T>(
 export async function registerDeadLetterHandler(boss: PgBoss): Promise<void> {
   await boss.work(QUEUE_NAMES.dead, async (jobs: JobLike<unknown>[]) => {
     for (const job of jobs) {
+      // Todos los payloads de recordatorios llevan `patientId`: lo extraemos
+      // (enmascarado) para que el dead-letter sea ACCIONABLE (poder rastrear al
+      // paciente/inscripción afectada). Sin esto el log solo tenía el jobId opaco.
+      const data = job.data as { patientId?: string } | null | undefined;
+      const patientId = data?.patientId ? maskId(data.patientId) : undefined;
       logger.error('reminder dead-letter — job agotó reintentos', {
         event: 'queue',
         action: 'dead_letter',
         jobId: job.id,
+        patientId,
         // Gancho para Sentry: el error-handler global ya captura logger.error en
         // prod si se desea, pero acá dejamos el punto explícito para enriquecer.
       });
-      // TODO(T9+): Sentry.captureMessage('reminder dead-letter', { extra: { jobId: job.id } })
+      // FOLLOW-UP (controles): para recuperar el "auto-pause tras N fallos" del cron
+      // viejo, acá se podría leer job.data.patientProgramId y pausar la inscripción
+      // (o emitir a Sentry). Ver nota en reminder.service.ts (T13). No se hace aún
+      // para no acoplar el dead-letter genérico a la semántica de un cron puntual.
     }
   });
 }

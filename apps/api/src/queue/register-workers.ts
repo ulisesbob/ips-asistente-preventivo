@@ -6,6 +6,7 @@ import { makeFollowupHandler } from '../services/patient-followup.service';
 import { makeSurveyHandler } from '../services/survey.service';
 import { makeMedicationHandler } from '../services/medication-reminder.service';
 import { makeSelfReminderHandler } from '../services/self-reminder.service';
+import { makeControlHandler } from '../services/reminder.service';
 import { logger } from '../utils/logger';
 
 /**
@@ -67,8 +68,13 @@ export async function createQueues(boss: PgBoss): Promise<void> {
     });
   }
 
-  // Próxima etapa (inerte hasta su flag): crear su cola acá con la misma forma.
-  // if (config.QUEUE_CONTROL) { await boss.createQueue(QUEUE_NAMES.control, { name: QUEUE_NAMES.control, policy: 'short', deadLetter: QUEUE_NAMES.dead }); }
+  if (config.QUEUE_CONTROL) {
+    await boss.createQueue(QUEUE_NAMES.control, {
+      name: QUEUE_NAMES.control,
+      policy: 'short',
+      deadLetter: QUEUE_NAMES.dead,
+    });
+  }
 }
 
 /**
@@ -124,8 +130,14 @@ export async function registerQueueWorkers(boss: PgBoss): Promise<void> {
     });
   }
 
-  // Próxima etapa (inerte hasta su flag):
-  // if (config.QUEUE_CONTROL) { await boss.work(QUEUE_NAMES.control, makeControlHandler()); }
+  if (config.QUEUE_CONTROL) {
+    await boss.work(QUEUE_NAMES.control, makeControlHandler());
+    logger.info('worker registrado', {
+      event: 'queue',
+      action: 'register_worker',
+      queue: QUEUE_NAMES.control,
+    });
+  }
 
   await registerDeadLetterHandler(boss);
 }
