@@ -111,19 +111,6 @@ export default function ImportarPage() {
   const [apiError, setApiError] = useState<ImportError | null>(null);
   const [showErrors, setShowErrors] = useState(false);
 
-  // ── Access guard ──────────────────────────────────────────────────────────
-
-  if (!doctor) return null;
-  if (doctor.role !== 'ADMIN') {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <p className="text-sm text-muted-foreground">
-          Solo los administradores pueden importar pacientes.
-        </p>
-      </div>
-    );
-  }
-
   // ── File handling ─────────────────────────────────────────────────────────
 
   const handleFile = (file: File) => {
@@ -218,6 +205,22 @@ export default function ImportarPage() {
     setApiError(null);
     setShowErrors(false);
   };
+
+  // ── Access guard ──────────────────────────────────────────────────────────
+  // Todos los hooks (incl. useCallback) corren ANTES de este return condicional
+  // para evitar el crash "rendered more hooks than during the previous render"
+  // (mismo patrón correcto que medicos/page.tsx).
+
+  if (!doctor) return null;
+  if (doctor.role !== 'ADMIN') {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <p className="text-sm text-muted-foreground">
+          Solo los administradores pueden importar pacientes.
+        </p>
+      </div>
+    );
+  }
 
   // ── Render ────────────────────────────────────────────────────────────────
 
