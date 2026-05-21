@@ -1,5 +1,15 @@
 import { z } from 'zod';
 
+// Parser de flags booleanos por env var. OJO: z.coerce.boolean() es un footgun —
+// convierte CUALQUIER string no vacío (incluido "false") en true. Esto interpreta
+// el valor de verdad: SOLO "true"/"1"/"yes"/"on" (case-insensitive) = true; "false",
+// "0", vacío o ausente = false. Clave para el rollback (poner el flag en "false"
+// DEBE apagarlo).
+export const boolFlag = z
+  .string()
+  .optional()
+  .transform((v) => ['true', '1', 'yes', 'on'].includes((v ?? '').trim().toLowerCase()));
+
 const envSchema = z.object({
   // Required
   DATABASE_URL: z.string().min(1, 'DATABASE_URL es requerida'),
@@ -50,6 +60,22 @@ const envSchema = z.object({
   // IPS contacto — default al 0800 oficial. Override por env para reutilizar
   // el código en otras provincias / otros clientes sin tocar texto hardcoded.
   IPS_SUPPORT_PHONE: z.string().default('0800-888-0109'),
+
+  // ─── Bloque B: cola de recordatorios (pg-boss + Bottleneck) ────────────────
+  // TODOS default OFF/defaults: la cola nace INERTE. Mientras estos flags estén
+  // en false, los crons viejos siguen mandando y nada de la cola se activa.
+  // Rollout gradual: prender por cron en orden de menor→mayor riesgo (ver plan).
+  QUEUE_ENABLED: boolFlag, // master kill switch
+  QUEUE_FOLLOWUP: boolFlag,
+  QUEUE_SURVEY: boolFlag,
+  QUEUE_MEDICATION: boolFlag,
+  QUEUE_SELF: boolFlag,
+  QUEUE_CONTROL: boolFlag,
+  // Modo sombra: encola pero NO envía (sólo loguea) — para comparar conteos.
+  QUEUE_SHADOW: boolFlag,
+  // Rate-limit de envío (Bottleneck). Arrancar conservador (< tier Twilio).
+  SEND_RATE_PER_SEC: z.coerce.number().default(40),
+  SEND_MAX_CONCURRENT: z.coerce.number().default(20),
 });
 
 const parsed = envSchema.safeParse(process.env);
