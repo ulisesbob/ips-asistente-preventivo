@@ -1,16 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── T11 — Migración de Medicación (#2) a la cola pg-boss ──────────────────────
-// Mismo patrón validado en followup. Particularidad de medicación: NO muta estado
-// por envío (no hay lastSentAt). La idempotencia es 100% por singletonKey
-// (medication:{reminderId}:{date}:{HH:MM}) + el hecho de que el cron matchea un
-// único slot por día. Por eso el handler NO hace updateMany: solo guard + envío.
-// Cubre:
+// Mismo patrón validado en followup, con idempotencia de 2 capas (C-1 resuelto):
+// medicación marca `lastSentAt` tras enviar, así un reintento de LOTE de pg-boss no
+// re-envía (el guard descarta los ya enviados hoy). Cubre:
 //   - enqueueMedicationReminders(): desactiva vencidos primero (mismo side-effect
-//     que el viejo), luego encola SIN tope (N>200 → N sends) con singletonKey +
-//     retryLimit/backoff. NO envía. M2: enqueued cuenta encolados reales.
-//   - makeMedicationHandler(): envía vía limiter; guard re-lee active + no vencido
-//     + consent; si send=false → throw; QUEUE_SHADOW → ni envía.
+//     que el viejo), excluye los ya enviados hoy (lastSentAt), luego encola SIN tope
+//     (N>200 → N sends) con singletonKey + retryLimit/backoff. NO envía.
+//   - makeMedicationHandler(): guard re-lee active + no vencido + consent + NO
+//     enviado hoy; envía vía limiter; MARCA lastSentAt (updateMany condicional); si
+//     send=false → throw (sin marcar); QUEUE_SHADOW → ni envía ni marca.
 
 const mockPrisma = {
   medicationReminder: {
@@ -114,6 +113,18 @@ describe('enqueueMedicationReminders — encola sin tope', () => {
     expect(deactivateArg.data).toMatchObject({ active: false });
   });
 
+  it('el productor EXCLUYE los ya enviados hoy (where con lastSentAt) — C-1', async () => {
+    mockPrisma.medicationReminder.findMany.mockResolvedValueOnce([medRow(1)]).mockResolvedValue([]);
+
+    const { boss } = makeFakeBoss();
+    const { enqueueMedicationReminders } = await import('../services/medication-reminder.service');
+    await enqueueMedicationReminders(boss);
+
+    // La query de candidatos (segundo updateMany es la de deactivate; findMany es el barrido)
+    const whereArg = mockPrisma.medicationReminder.findMany.mock.calls[0][0].where;
+    expect(JSON.stringify(whereArg)).toContain('lastSentAt');
+  });
+
   it('manda el singletonKey (medication:{id}:{date}:{HH:MM}) + retryLimit:5 + retryBackoff:true', async () => {
     mockPrisma.medicationReminder.findMany.mockResolvedValueOnce([medRow(7)]).mockResolvedValue([]);
 
@@ -185,7 +196,7 @@ describe('enqueueMedicationReminders — encola sin tope', () => {
 
 // ─── makeMedicationHandler ─────────────────────────────────────────────────────
 
-describe('makeMedicationHandler — worker (sin mutación de estado)', () => {
+describe('makeMedicationHandler — worker idempotente vía lastSentAt (C-1)', () => {
   const payload = {
     reminderId: 'med-1',
     patientId: 'pat-1',
@@ -205,8 +216,9 @@ describe('makeMedicationHandler — worker (sin mutación de estado)', () => {
     };
   }
 
-  it('envía cuando el guard pasa (active, no vencido, consent), SIN mutar estado', async () => {
+  it('envía y MARCA lastSentAt (idempotencia C-1) con updateMany condicional', async () => {
     mockPrisma.medicationReminder.findFirst.mockResolvedValue(medGuardRow());
+    mockPrisma.medicationReminder.updateMany.mockResolvedValue({ count: 1 });
 
     const { makeMedicationHandler } = await import('../services/medication-reminder.service');
     const handler = makeMedicationHandler();
@@ -216,14 +228,20 @@ describe('makeMedicationHandler — worker (sin mutación de estado)', () => {
     expect(mockSendTextMessage).toHaveBeenCalledTimes(1);
     expect(mockSendTextMessage.mock.calls[0][0]).toBe('543764125878');
     expect(mockSendTextMessage.mock.calls[0][1]).toContain('Enalapril');
-    // Medicación NO muta estado por envío.
-    expect(mockPrisma.medicationReminder.updateMany).not.toHaveBeenCalled();
+    // Ahora SÍ muta: marca lastSentAt para que un reintento de lote no re-envíe.
+    expect(mockPrisma.medicationReminder.updateMany).toHaveBeenCalledTimes(1);
+    const upd = mockPrisma.medicationReminder.updateMany.mock.calls[0][0];
+    expect(upd.where).toMatchObject({ id: 'med-1', active: true });
+    expect(upd.data.lastSentAt).toBeInstanceOf(Date);
+    // El where condicional reincluye la condición de lastSentAt (no re-marcar en carrera).
+    expect(JSON.stringify(upd.where)).toContain('lastSentAt');
   });
 
   it('incluye la línea de instrucciones cuando existe', async () => {
     mockPrisma.medicationReminder.findFirst.mockResolvedValue(
       medGuardRow({ instructions: 'Tomar con comida' })
     );
+    mockPrisma.medicationReminder.updateMany.mockResolvedValue({ count: 1 });
 
     const { makeMedicationHandler } = await import('../services/medication-reminder.service');
     const handler = makeMedicationHandler();
@@ -232,7 +250,7 @@ describe('makeMedicationHandler — worker (sin mutación de estado)', () => {
     expect(mockSendTextMessage.mock.calls[0][1]).toContain('Tomar con comida');
   });
 
-  it('C2: NO llama sendTextMessage dentro de una $transaction', async () => {
+  it('C2: el envío ocurre FUERA de la $transaction', async () => {
     mockPrisma.medicationReminder.findFirst.mockResolvedValue(medGuardRow());
 
     const { makeMedicationHandler } = await import('../services/medication-reminder.service');
@@ -241,10 +259,9 @@ describe('makeMedicationHandler — worker (sin mutación de estado)', () => {
 
     expect(mockSendTextMessage).toHaveBeenCalledTimes(1);
     expect(sendCalledInsideTx).toBe(false);
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('guard: el findFirst chequea active + consent + no-vencido', async () => {
+  it('guard: el findFirst chequea active + consent + no-vencido + lastSentAt (no enviado hoy)', async () => {
     mockPrisma.medicationReminder.findFirst.mockResolvedValue(medGuardRow());
 
     const { makeMedicationHandler } = await import('../services/medication-reminder.service');
@@ -254,11 +271,43 @@ describe('makeMedicationHandler — worker (sin mutación de estado)', () => {
     const guardWhere = mockPrisma.medicationReminder.findFirst.mock.calls[0][0].where;
     expect(guardWhere).toMatchObject({ id: 'med-1', active: true });
     expect(guardWhere.patient).toMatchObject({ consent: true });
-    // No-vencido: endDate null OR >= hoy.
-    expect(guardWhere.OR ?? guardWhere.AND).toBeDefined();
+    // El guard reincluye la condición de lastSentAt (null OR < hoy) — clave de C-1:
+    // si ya se envió hoy, un reintento de lote NO vuelve a enviar.
+    expect(JSON.stringify(guardWhere)).toContain('lastSentAt');
   });
 
-  it('guard idempotente: si el recordatorio ya no es candidato (findFirst null) → NO envía', async () => {
+  it('el guard usa la forma exacta del OR de lastSentAt (null OR < cutoff de hoy)', async () => {
+    mockPrisma.medicationReminder.findFirst.mockResolvedValue(medGuardRow());
+
+    const { makeMedicationHandler } = await import('../services/medication-reminder.service');
+    const handler = makeMedicationHandler();
+    await handler([{ id: 'j1', data: payload }]);
+
+    const guardWhere = mockPrisma.medicationReminder.findFirst.mock.calls[0][0].where;
+    const clause = guardWhere.AND.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((o: any) => 'lastSentAt' in o)
+    );
+    expect(clause).toBeDefined();
+    expect(clause.OR).toEqual([
+      { lastSentAt: null },
+      { lastSentAt: { lt: expect.any(Date) } },
+    ]);
+  });
+
+  it('updateMany de marca devuelve count 0 (otro worker ya marcó) → no rompe', async () => {
+    mockPrisma.medicationReminder.findFirst.mockResolvedValue(medGuardRow());
+    mockPrisma.medicationReminder.updateMany.mockResolvedValue({ count: 0 });
+
+    const { makeMedicationHandler } = await import('../services/medication-reminder.service');
+    const handler = makeMedicationHandler();
+    // No debe lanzar aunque el updateMany condicional no afecte filas (carrera).
+    await handler([{ id: 'j1', data: payload }]);
+
+    expect(mockSendTextMessage).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.medicationReminder.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('C-1: ya enviado hoy (findFirst null) → NO envía NI re-marca', async () => {
     mockPrisma.medicationReminder.findFirst.mockResolvedValue(null);
 
     const { makeMedicationHandler } = await import('../services/medication-reminder.service');
@@ -266,9 +315,10 @@ describe('makeMedicationHandler — worker (sin mutación de estado)', () => {
     await handler([{ id: 'j1', data: payload }]);
 
     expect(mockSendTextMessage).not.toHaveBeenCalled();
+    expect(mockPrisma.medicationReminder.updateMany).not.toHaveBeenCalled();
   });
 
-  it('hace throw cuando sendTextMessage devuelve false (pg-boss reintenta)', async () => {
+  it('hace throw cuando sendTextMessage devuelve false (pg-boss reintenta), NO marca', async () => {
     mockPrisma.medicationReminder.findFirst.mockResolvedValue(medGuardRow());
     mockSendTextMessage.mockImplementation(async () => {
       if (txDepth > 0) sendCalledInsideTx = true;
@@ -279,9 +329,10 @@ describe('makeMedicationHandler — worker (sin mutación de estado)', () => {
     const handler = makeMedicationHandler();
 
     await expect(handler([{ id: 'j1', data: payload }])).rejects.toThrow();
+    expect(mockPrisma.medicationReminder.updateMany).not.toHaveBeenCalled();
   });
 
-  it('QUEUE_SHADOW=true: NO envía, solo loguea', async () => {
+  it('QUEUE_SHADOW=true: NO envía ni marca, solo loguea', async () => {
     mockConfig.QUEUE_SHADOW = true;
     mockPrisma.medicationReminder.findFirst.mockResolvedValue(medGuardRow());
 
@@ -290,10 +341,12 @@ describe('makeMedicationHandler — worker (sin mutación de estado)', () => {
     await handler([{ id: 'j1', data: payload }]);
 
     expect(mockSendTextMessage).not.toHaveBeenCalled();
+    expect(mockPrisma.medicationReminder.updateMany).not.toHaveBeenCalled();
   });
 
   it('procesa cada job del batch (pg-boss v10 entrega arrays)', async () => {
     mockPrisma.medicationReminder.findFirst.mockResolvedValue(medGuardRow());
+    mockPrisma.medicationReminder.updateMany.mockResolvedValue({ count: 1 });
 
     const { makeMedicationHandler } = await import('../services/medication-reminder.service');
     const handler = makeMedicationHandler();
@@ -303,5 +356,6 @@ describe('makeMedicationHandler — worker (sin mutación de estado)', () => {
     ]);
 
     expect(mockSendTextMessage).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.medicationReminder.updateMany).toHaveBeenCalledTimes(2);
   });
 });

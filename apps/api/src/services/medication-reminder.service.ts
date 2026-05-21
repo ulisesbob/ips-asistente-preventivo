@@ -322,6 +322,17 @@ function medicationCandidateWhere(argHour: number, slot: number, today: Date) {
   };
 }
 
+/**
+ * Condición "no enviado HOY" (idempotencia C-1). `lastSentAt` null (nunca enviado
+ * por la cola) o anterior a la medianoche UTC de hoy → candidato. Como cada
+ * recordatorio tiene un único slot por día, "enviado hoy" alcanza para deduplicar
+ * un reintento de lote. Solo lo usa el camino de COLA (productor + guard); el viejo
+ * in-process no toca lastSentAt (queda null → no afecta su comportamiento).
+ */
+function medicationNotSentTodayOR(today: Date) {
+  return [{ lastSentAt: null }, { lastSentAt: { lt: today } }];
+}
+
 /** Texto del recordatorio de medicación. Puro (exportado para tests). */
 export function buildMedicationMessage(
   fullName: string,
@@ -414,27 +425,25 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
 // ─── Bloque B (T11): camino por cola pg-boss (detrás de QUEUE_MEDICATION) ──────
 //
 // PRODUCTOR: enqueueMedicationReminders desactiva vencidos, luego encola 1 job por
-// recordatorio del slot actual (sin tope, paginando). CONSUMIDOR:
-// makeMedicationHandler envía vía limiter. Particularidad: medicación NO muta
-// estado por envío, así que NO hay update post-envío.
+// recordatorio del slot actual (sin tope, paginando; excluye los ya enviados hoy).
+// CONSUMIDOR: makeMedicationHandler envía vía limiter y MARCA lastSentAt.
 //
-// DIFERENCIA DE RAÍZ con followup/survey: el modelo MedicationReminder NO tiene
-// columna donde marcar "enviado" (no hay lastSentAt/dispatchedAt). Por eso la
-// idempotencia de capa 2 (no aplicar el efecto dos veces) NO PUEDE apoyarse en un
-// updateMany condicional como en followup (noProgramReminderCount) o survey
-// (dispatchedAt): acá depende 100% de la capa 1 (singletonKey). No es una omisión
-// del patrón — es lo que fuerza el dominio.
-//
-// Idempotencia:
+// Idempotencia (2 capas, paridad con survey/self — C-1 resuelto):
 //   1) singletonKey (medication:{reminderId}:{date}:{HH:MM}) + policy 'short' →
 //      un único job por recordatorio/slot/día (no re-encola si el cron redispara).
-//   2) guard en el handler: re-lee active + no-vencido + consent. Un reintento de
-//      pg-boss tras un fallo de red reenvía (deseado para medicación, a diferencia
-//      de followup donde reenviar antes del intervalo sería spam). El único hueco
-//      es el doble envío ante crash post-send/pre-ack: at-least-once inherente, que
-//      el camino viejo YA tenía (nunca marcó "enviado") y que la cola incluso acota
-//      (el singletonKey impide re-encolar mientras el job vive). Un recordatorio de
-//      pastilla duplicado es molesto, no peligroso. El envío va FUERA de tx.
+//   2) guard en el handler: re-lee active + no-vencido + consent + NO enviado hoy
+//      (lastSentAt). Tras enviar (FUERA de tx) marca lastSentAt con un updateMany
+//      condicional. Esto hace idempotente el reintento de LOTE de pg-boss (un throw
+//      falla el lote entero → reintenta los N): el ya enviado tiene lastSentAt=hoy →
+//      el guard lo descarta → no re-envía. Antes medicación no marcaba nada y por eso
+//      el batch re-enviaba (C-1); ya no.
+//   Queda el at-least-once residual común a todos: un crash entre el envío y la marca
+//   puede reenviar ese job puntual. Un recordatorio de pastilla duplicado es molesto,
+//   no peligroso.
+//
+// CUTOVER (operacional): al prender QUEUE_MEDICATION a mitad de día, un slot que el
+// camino viejo ya envió (sin marcar lastSentAt) puede reenviarse UNA vez (el nuevo lo
+// ve como "nunca enviado"). Una sola ventana, aceptable; prender en un borde de slot.
 
 /**
  * Productor: encola un job por CADA recordatorio del slot actual, sin el tope
@@ -449,7 +458,14 @@ export async function enqueueMedicationReminders(
 
   await deactivateExpiredMedications(today);
 
-  const where = medicationCandidateWhere(argHour, slot, today);
+  // El productor extiende el `where` compartido con "no enviado hoy" (C-1): no
+  // re-encola los que ya se enviaron en este día (el guard del handler igual lo
+  // re-chequea). El camino viejo usa el `where` SIN esta condición.
+  const base = medicationCandidateWhere(argHour, slot, today);
+  const where = {
+    ...base,
+    AND: [...base.AND, { OR: medicationNotSentTodayOR(today) }],
+  };
 
   let enqueued = 0;
   let cursor: string | undefined;
@@ -507,17 +523,15 @@ type JobLike<T> = { id: string; data: T };
 
 /**
  * Consumidor: construye el handler del worker `reminders:medication`.
- * Guard re-lee el recordatorio (active + no-vencido + consent), envía FUERA de tx.
- * NO muta estado (medicación no tiene marca de "enviado").
+ * Guard re-lee el recordatorio (active + no-vencido + consent + NO enviado hoy) y,
+ * tras enviar FUERA de tx, marca `lastSentAt`.
  *
- * 🚩 RELEASE-GATE (code-review C-1): NO prender QUEUE_MEDICATION hasta resolver esto.
- * Con el procesamiento por LOTES (runJobBatch) + la semántica de pg-boss (un throw
- * falla el lote ENTERO → reintenta los N), si UN envío del lote falla, los demás —ya
- * enviados— se RE-ENVÍAN en el reintento, porque medicación no tiene guard contra
- * re-envío (no marca "enviado"). Los otros 4 crons están protegidos por su guard de
- * re-lectura; medicación no. Fix correcto: agregar `lastSentAt` (o registro de envío)
- * a MedicationReminder + chequearlo en el guard (migración aditiva, mismo patrón que
- * survey/self). Mientras tanto QUEUE_MEDICATION debe quedar en false.
+ * C-1 RESUELTO (code-review): con el procesamiento por LOTES + la semántica de pg-boss
+ * (un throw falla el lote ENTERO → reintenta los N), un fallo de envío reintenta todo
+ * el lote. La marca `lastSentAt` hace a medicación idempotente como los otros 4 crons:
+ * el guard descarta los ya enviados HOY, así que el reintento NO re-envía. (Antes
+ * medicación no tenía marca de envío → re-enviaba; por eso QUEUE_MEDICATION estaba
+ * gateado. Ya no.)
  */
 export function makeMedicationHandler(): (
   jobs: JobLike<MedicationJobPayload>[]
@@ -534,7 +548,8 @@ async function processMedicationJob(payload: MedicationJobPayload): Promise<void
   const { reminderId, phone } = payload;
   const today = todayUtcMidnight();
 
-  // GUARD: re-lee que el recordatorio sigue activo, no vencido y con consent. NO
+  // GUARD: re-lee que el recordatorio sigue activo, no vencido, con consent Y no
+  // enviado HOY (C-1: si ya se envió, un reintento de lote NO debe re-enviar). NO
   // re-chequea el slot a propósito (un médico pudo editar la hora entre encolar y
   // consumir; el mensaje sigue siendo válido para ese paciente).
   const reminder = await prisma.medicationReminder.findFirst({
@@ -542,7 +557,10 @@ async function processMedicationJob(payload: MedicationJobPayload): Promise<void
       id: reminderId,
       active: true,
       patient: { consent: true, phone: { not: null } },
-      OR: [{ endDate: null }, { endDate: { gte: today } }],
+      AND: [
+        { OR: [{ endDate: null }, { endDate: { gte: today } }] },
+        { OR: medicationNotSentTodayOR(today) },
+      ],
     },
     select: {
       id: true,
@@ -554,7 +572,7 @@ async function processMedicationJob(payload: MedicationJobPayload): Promise<void
   });
 
   if (!reminder) {
-    logger.info('medication skip — ya no es candidato (inactivo / vencido / sin consent)', {
+    logger.info('medication skip — ya no es candidato (inactivo / vencido / sin consent / ya enviado hoy)', {
       event: 'queue',
       action: 'medication_skip',
       reminderId: maskId(reminderId),
@@ -583,4 +601,17 @@ async function processMedicationJob(payload: MedicationJobPayload): Promise<void
   if (!ok) {
     throw new Error('send_failed');
   }
+
+  // C-1: marca lastSentAt para que un reintento de lote (pg-boss falla el lote entero
+  // ante un throw) NO vuelva a enviar este recordatorio — el guard de arriba lo
+  // descartará. `updateMany` con where CONDICIONAL ("no enviado hoy") → idempotente
+  // ante carrera; va FUERA de transacción (la red ya ocurrió).
+  await prisma.medicationReminder.updateMany({
+    where: {
+      id: reminder.id,
+      active: true,
+      AND: [{ OR: medicationNotSentTodayOR(today) }],
+    },
+    data: { lastSentAt: new Date() },
+  });
 }

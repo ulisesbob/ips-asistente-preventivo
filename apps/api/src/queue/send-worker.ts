@@ -40,11 +40,11 @@ type JobLike<T> = { id: string; data: T };
  * jobIds del batch. Acá procesamos todos los jobs (un fallo NO corta el resto) y
  * recién al final hacemos throw si hubo alguno → pg-boss reintenta el lote ENTERO.
  *
- * ⚠️ Esto es idempotente SOLO para los crons cuyo handler tiene guard de re-lectura
- * (followup/survey/self/control re-leen estado y hacen skip en el reintento). Para
- * MEDICACIÓN —que NO marca "enviado"— un reintento de lote RE-ENVÍA los ya enviados
- * de ese lote (at-least-once amplificado por el batch). Ver el handler de medicación:
- * QUEUE_MEDICATION queda gateado hasta agregarle una marca de envío idempotente.
+ * Esto es seguro porque los 5 handlers tienen guard de re-lectura idempotente: ante
+ * el reintento del lote re-leen su estado y hacen skip de lo ya aplicado (followup
+ * count/lastAt, survey dispatchedAt, self status, control advance condicional, y
+ * medicación lastSentAt — C-1 resuelto). Queda solo el at-least-once residual común a
+ * todos: un crash entre el envío y la marca puede reenviar ese job puntual.
  */
 export async function runJobBatch<T>(
   jobs: JobLike<T>[],

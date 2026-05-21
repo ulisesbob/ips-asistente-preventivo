@@ -335,6 +335,10 @@ model MedicationReminder {
   // Efectos secundarios validados por el médico. NUNCA los genera la IA (ley 25.326).
   sideEffects    String?
   createdAt      DateTime @default(now()) @db.Timestamptz()
+  // Última vez que se envió el recordatorio (idempotencia C-1 del Bloque B). El cron
+  // de cola lo setea tras enviar y el guard descarta los ya enviados HOY → un reintento
+  // de lote NO re-envía. El camino viejo in-process no lo usa (es null por defecto).
+  lastSentAt     DateTime? @db.Timestamptz()
 
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
   doctor  Doctor? @relation(fields: [doctorId], references: [id], onDelete: Restrict)
