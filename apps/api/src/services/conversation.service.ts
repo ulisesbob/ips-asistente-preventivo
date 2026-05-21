@@ -85,6 +85,15 @@ const MENU_MESSAGE =
   '*2* · Quiero registrarme en un programa\n' +
   '*3* · Quiero sacar un turno';
 
+// Variante para paciente CONOCIDO que pide "menú": sin la presentación de "primera
+// vez" (ya nos conoce) y sin revelar su nombre/programas (evita confirmar por la
+// forma del saludo que ese teléfono es paciente — security audit M-4).
+const MENU_MESSAGE_KNOWN =
+  '¿En qué te puedo ayudar? Respondé con el *número*:\n\n' +
+  '*1* · Tengo una consulta\n' +
+  '*2* · Quiero registrarme en un programa\n' +
+  '*3* · Quiero sacar un turno';
+
 const TURNO_PLACEHOLDER_MESSAGE =
   'La opción de *turnos* todavía no está disponible — la vamos a habilitar pronto. 🙏\n\n' +
   'Mientras tanto puedo ayudarte con una *consulta* (1) o con *registrarte en un programa* (2). ' +
@@ -128,6 +137,64 @@ const reminderFlowState = new Map<string, ReminderFlowState>();
 // flujo (eligiendo, en consulta, o eligiendo programa). Al expirar, se re-muestra.
 const menuState = new Map<string, MenuState>();
 
+// ─── Rate limit del chat anónimo (anti-abuso de costo LLM, security audit A-1) ──
+// Un número NO registrado puede chatear con la IA por la opción 1 sin registrarse.
+// Acotamos cuántas consultas por número/ventana para que un número abusivo no
+// dispare llamadas ilimitadas al LLM (el webhook ya valida firma, pero el bucket
+// de rate-limit del webhook es global, no por remitente).
+const ANON_CHAT_MAX_PER_WINDOW = 30;
+const ANON_CHAT_WINDOW_MS = 60 * 60 * 1000; // 1 hora
+interface AnonRateState {
+  count: number;
+  createdAt: number; // inicio de la ventana
+}
+const anonChatRate = new Map<string, AnonRateState>();
+
+// Cota dura de cardinalidad para los Maps en memoria: evita OOM si un atacante
+// rota números (cada teléfono distinto crea una entrada) (security audit A-2). El
+// cleanup por TTL corre cada 10 min; esto contiene los picos entre corridas.
+const MAX_INMEM_ENTRIES = 20000;
+
+/**
+ * set() con cota de tamaño: si el Map está lleno y la clave es nueva, evicta la
+ * entrada más vieja (menor createdAt) antes de insertar. O(n) sólo cuando está
+ * lleno (caso de abuso), O(1) en operación normal.
+ */
+function boundedSet<V extends { createdAt: number }>(
+  map: Map<string, V>,
+  key: string,
+  value: V
+): void {
+  if (!map.has(key) && map.size >= MAX_INMEM_ENTRIES) {
+    let oldestKey: string | undefined;
+    let oldestAt = Infinity;
+    for (const [k, v] of map.entries()) {
+      if (v.createdAt < oldestAt) {
+        oldestAt = v.createdAt;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey !== undefined) map.delete(oldestKey);
+  }
+  map.set(key, value);
+}
+
+/**
+ * ¿Se permite otra consulta anónima de este número? Cuenta por ventana deslizante
+ * simple. Devuelve false cuando supera el tope (el llamador corta sin pegarle al LLM).
+ */
+function allowAnonChat(phone: string): boolean {
+  const now = Date.now();
+  const state = anonChatRate.get(phone);
+  if (!state || now - state.createdAt > ANON_CHAT_WINDOW_MS) {
+    boundedSet(anonChatRate, phone, { count: 1, createdAt: now });
+    return true;
+  }
+  if (state.count >= ANON_CHAT_MAX_PER_WINDOW) return false;
+  state.count += 1;
+  return true;
+}
+
 // Periodic cleanup of stale entries
 setInterval(() => {
   const now = Date.now();
@@ -144,6 +211,11 @@ setInterval(() => {
   for (const [phone, state] of menuState.entries()) {
     if (now - state.createdAt > MENU_TTL_MS) {
       menuState.delete(phone);
+    }
+  }
+  for (const [phone, state] of anonChatRate.entries()) {
+    if (now - state.createdAt > ANON_CHAT_WINDOW_MS) {
+      anonChatRate.delete(phone);
     }
   }
 }, 10 * 60 * 1000); // every 10 minutes
@@ -355,9 +427,12 @@ async function routeMenuOrChat(
 ): Promise<void> {
   const t = text.toLowerCase().trim();
 
-  // "menú" / "opciones" en cualquier momento → re-mostrar el menú.
+  // "menú" / "opciones" en cualquier momento → re-mostrar el menú. Limpiamos TAMBIÉN
+  // el registro en curso: si alguien abandonó el alta a mitad y pidió el menú, no
+  // queremos dejar un registrationState huérfano que reviva sin contexto (review A1).
   if (MENU_KEYWORDS.includes(t)) {
     menuState.delete(normalizedPhone);
+    registrationState.delete(normalizedPhone);
     await showMenu(normalizedPhone, e164Phone, patient?.id ?? null, text);
     return;
   }
@@ -391,10 +466,11 @@ async function showMenu(
   patientId: string | null,
   userText: string
 ): Promise<void> {
-  const sent = await sendTextMessage(toSendablePhone(normalizedPhone), MENU_MESSAGE);
+  const message = patientId ? MENU_MESSAGE_KNOWN : MENU_MESSAGE;
+  const sent = await sendTextMessage(toSendablePhone(normalizedPhone), message);
   if (!sent) return; // no avanzamos estado si el envío falló (el paciente reintenta)
-  await saveSystemMessage(e164Phone, patientId, userText, MENU_MESSAGE);
-  menuState.set(normalizedPhone, { step: 'AWAITING_CHOICE', createdAt: Date.now() });
+  await saveSystemMessage(e164Phone, patientId, userText, message);
+  boundedSet(menuState, normalizedPhone, { step: 'AWAITING_CHOICE', createdAt: Date.now() });
 }
 
 async function handleMenuState(
@@ -406,12 +482,14 @@ async function handleMenuState(
 ): Promise<void> {
   // Ya eligió "consulta": los mensajes siguientes van al chat con Ana.
   if (menu.step === 'IN_CONSULTA') {
+    // Refrescamos el TTL al RECIBIR el mensaje (antes del await): si handleChat
+    // lanza, la sesión no queda "vieja" y expirando a mitad de conversación (review M4).
+    boundedSet(menuState, normalizedPhone, { step: 'IN_CONSULTA', createdAt: Date.now() });
     if (patient) {
       await handleChat(normalizedPhone, e164Phone, patient, text);
     } else {
       await handleGeneralChat(normalizedPhone, e164Phone, text);
     }
-    menuState.set(normalizedPhone, { step: 'IN_CONSULTA', createdAt: Date.now() }); // refresca TTL
     return;
   }
 
@@ -425,9 +503,13 @@ async function handleMenuState(
   const choice = text.trim();
 
   if (choice === '1') {
-    menuState.set(normalizedPhone, { step: 'IN_CONSULTA', createdAt: Date.now() });
     const msg = 'Perfecto 😊. Contame tu consulta y te ayudo.';
-    await sendTextMessage(toSendablePhone(normalizedPhone), msg);
+    // Enviar ANTES de avanzar a IN_CONSULTA: si el envío falla, el paciente sigue
+    // en AWAITING_CHOICE y reintenta, sin quedar atrapado esperando una consulta
+    // que nunca se le pidió (review C1 / LESSONS #31).
+    const sent = await sendTextMessage(toSendablePhone(normalizedPhone), msg);
+    if (!sent) return;
+    boundedSet(menuState, normalizedPhone, { step: 'IN_CONSULTA', createdAt: Date.now() });
     await saveSystemMessage(e164Phone, patient?.id ?? null, text, msg);
     return;
   }
@@ -440,15 +522,27 @@ async function handleMenuState(
   if (choice === '3') {
     await sendTextMessage(toSendablePhone(normalizedPhone), TURNO_PLACEHOLDER_MESSAGE);
     await saveSystemMessage(e164Phone, patient?.id ?? null, text, TURNO_PLACEHOLDER_MESSAGE);
-    menuState.set(normalizedPhone, { step: 'AWAITING_CHOICE', createdAt: Date.now() }); // sigue eligible
+    boundedSet(menuState, normalizedPhone, { step: 'AWAITING_CHOICE', createdAt: Date.now() }); // sigue eligible
     return;
   }
 
-  // No eligió número: si pide un humano, no lo atrapamos en el menú — escalamos.
-  const tl = text.toLowerCase();
-  if (patient && ESCALATION_KEYWORDS.some((kw) => tl.includes(kw))) {
-    menuState.delete(normalizedPhone);
-    await handleEscalation(normalizedPhone, e164Phone, patient.id, text);
+  // No eligió número: si pide un humano, no lo atrapamos en el menú. Normalizamos
+  // acentos igual que el flujo principal (review A2) — los keywords no tienen tilde.
+  const tl = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (ESCALATION_KEYWORDS.some((kw) => tl.includes(kw))) {
+    if (patient) {
+      menuState.delete(normalizedPhone);
+      await handleEscalation(normalizedPhone, e164Phone, patient.id, text);
+      return;
+    }
+    // Desconocido: no hay ficha a la cual escalar. En vez de "no te entendí" lo
+    // derivamos al soporte y lo dejamos eligible en el menú (review A3).
+    const human =
+      `Para hablar con una persona del IPS, comuníquese al ${config.IPS_SUPPORT_PHONE}.\n\n` +
+      `También puedo ayudarte con una *consulta* (respondé *1*) o escribí *menú* para ver las opciones.`;
+    await sendTextMessage(toSendablePhone(normalizedPhone), human);
+    await saveSystemMessage(e164Phone, null, text, human);
+    boundedSet(menuState, normalizedPhone, { step: 'AWAITING_CHOICE', createdAt: Date.now() });
     return;
   }
 
@@ -465,6 +559,16 @@ async function handleGeneralChat(
   e164Phone: string,
   text: string
 ): Promise<void> {
+  // Anti-abuso de costo: acotamos consultas anónimas por número/ventana antes de
+  // pegarle al LLM (security audit A-1). Un número genuino nunca llega al tope.
+  if (!allowAnonChat(normalizedPhone)) {
+    const msg =
+      `Recibí varias consultas tuyas 🙏. Para seguir ayudándote ahora mismo, ` +
+      `comuníquese al ${config.IPS_SUPPORT_PHONE}, o volvé a escribirme en un rato.`;
+    await sendTextMessage(toSendablePhone(normalizedPhone), msg);
+    return; // no persistimos ni llamamos al LLM bajo abuso
+  }
+
   const kbEntries = await getRelevantKBForBot(text);
   const systemPrompt = buildSystemPrompt({
     fullName: '',
@@ -475,6 +579,10 @@ async function handleGeneralChat(
     selfReminders: [],
   });
 
+  // Aislamiento (security audit C-1): el chat anónimo usa SIEMPRE una conversación
+  // sin paciente (patientId=null). getOrCreateConversation, con patientId null, ya
+  // NO reutiliza la conversación de un paciente del mismo teléfono — así un número
+  // reasignado no expone el historial de salud del dueño anterior al LLM.
   const conversation = await getOrCreateConversation(e164Phone, null);
   const history = await getConversationHistory(conversation.id);
   const messagesForAi: ChatMessage[] = [
@@ -487,10 +595,12 @@ async function handleGeneralChat(
     aiResponse = await generateResponse(systemPrompt, messagesForAi);
   } catch (error) {
     console.error('[AI] Error en chat general:', error);
-    aiResponse = 'Disculpá, tuve un problema técnico. Probá de nuevo en un momento.';
+    aiResponse = `Disculpá, tuve un problema técnico. Para consultas, comuníquese al ${config.IPS_SUPPORT_PHONE}.`;
   }
 
-  await saveMessages(e164Phone, null, text, aiResponse);
+  // Reutilizamos la MISMA conversación anónima (no un segundo getOrCreate) para
+  // mantener la continuidad y el aislamiento.
+  await saveMessagePair(conversation.id, text, aiResponse);
   await sendTextMessage(toSendablePhone(normalizedPhone), aiResponse);
 }
 
@@ -660,7 +770,7 @@ async function handleRegistration(
       return; // patient will retry; next message will hit this branch again
     }
     await saveSystemMessage(e164Phone, null, text, greeting);
-    registrationState.set(phone, { step: 'AWAITING_NAME', createdAt: Date.now() });
+    boundedSet(registrationState, phone, { step: 'AWAITING_NAME', createdAt: Date.now() });
     return;
   }
 
@@ -684,7 +794,7 @@ async function handleRegistration(
       console.warn(`[Registration] No se pudo enviar askDni a ${maskPhone(phone)} — no avanzo estado`);
       return;
     }
-    registrationState.set(phone, { step: 'AWAITING_DNI', tempName: name, createdAt: state.createdAt });
+    boundedSet(registrationState, phone, { step: 'AWAITING_DNI', tempName: name, createdAt: state.createdAt });
     await saveMessages(e164Phone, null, text, askDni);
     return;
   }
@@ -735,8 +845,10 @@ async function handleRegistration(
 
       if (otherPhoneLinked || panelCsvWithoutPhone) {
         const reason = otherPhoneLinked ? 'phone_mismatch' : `panel_csv_no_phone(${existing.registeredVia})`;
+        // No logueamos dígitos del DNI (ley 25.326 — minimización de PII en logs,
+        // security audit M-1). Con reason + teléfono enmascarado alcanza para auditar.
         console.warn(
-          `[Security] DNI ***${dni.slice(-3)} rejected (${reason}) from ${maskPhone(e164Phone)}.`
+          `[Security] Registro por DNI rechazado (${reason}) desde ${maskPhone(e164Phone)}.`
         );
         registrationState.delete(phone);
         // Mensaje único y deliberadamente vago. NO confirma existencia del DNI
@@ -833,7 +945,7 @@ async function startReminderFlow(
     'Ejemplo: "Tomar insulina", "Tomar pastilla presión"';
 
   await saveMessageAndReply(phone, e164Phone, patientId, text, msg);
-  reminderFlowState.set(phone, { step: 'AWAITING_DESCRIPTION', createdAt: Date.now() });
+  boundedSet(reminderFlowState, phone, { step: 'AWAITING_DESCRIPTION', createdAt: Date.now() });
 }
 
 async function handleReminderFlow(
@@ -868,7 +980,7 @@ async function handleReminderFlow(
       return;
     }
 
-    reminderFlowState.set(phone, {
+    boundedSet(reminderFlowState, phone, {
       step: 'AWAITING_TIME',
       description: desc,
       createdAt: state.createdAt,
@@ -1287,6 +1399,11 @@ async function getOrCreateConversation(
     where: {
       phone: e164Phone,
       status: ConversationStatus.OPEN,
+      // Llamado anónimo (patientId=null): NO reutilizar la conversación de un
+      // paciente del mismo teléfono. Evita filtrar el historial de salud del dueño
+      // anterior si el número se reasignó (security audit C-1). Con patientId
+      // definido (paciente conocido) el comportamiento no cambia.
+      ...(patientId === null ? { patientId: null } : {}),
     },
     select: { id: true },
   });
