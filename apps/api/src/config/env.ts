@@ -50,6 +50,19 @@ const envSchema = z.object({
   // IPS contacto — default al 0800 oficial. Override por env para reutilizar
   // el código en otras provincias / otros clientes sin tocar texto hardcoded.
   IPS_SUPPORT_PHONE: z.string().default('0800-888-0109'),
+
+  // ─── Auto-registro de médicos ──────────────────────────────────────────────
+  // Dominios de email habilitados para que un médico se auto-registre, separados
+  // por coma (ej. "ips.gob.ar,salud.misiones.gob.ar"). FAIL-CLOSED: si está vacío
+  // o ausente, el auto-registro queda DESHABILITADO (no se acepta a nadie). Así
+  // un deploy sin configurar no abre el registro a cualquiera.
+  ALLOWED_DOCTOR_EMAIL_DOMAINS: z.string().optional(),
+  // Resend — envío del mail de verificación. Sin API key: en dev el link se
+  // loguea por consola (no se manda nada); en producción, sin key, el registro
+  // devuelve error (no puede verificar el email).
+  RESEND_API_KEY: z.string().optional(),
+  // Remitente de los mails de verificación (debe ser de un dominio verificado en Resend).
+  EMAIL_FROM: z.string().default('IPS Asistente <onboarding@resend.dev>'),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { Activity } from 'lucide-react';
@@ -89,6 +90,13 @@ export default function LoginPage() {
             >
               {loading ? 'Ingresando...' : 'Ingresar'}
             </button>
+
+            <p className="text-sm text-muted-foreground text-center">
+              ¿No tenés cuenta?{' '}
+              <Link href="/registro" className="text-primary hover:underline">
+                Registrate
+              </Link>
+            </p>
           </div>
         </form>
 

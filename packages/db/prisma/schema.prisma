@@ -92,11 +92,24 @@ model Doctor {
   tokenVersion Int      @default(0)
   createdAt    DateTime @default(now()) @db.Timestamptz()
 
+  // ─── Auto-registro de médicos ──────────────────────────────────────────────
+  // Matrícula profesional declarada en el alta (nullable: los médicos creados por
+  // un admin antes de esta feature no la tienen).
+  licenseNumber String?
+  // Verificación de email: null = pendiente (NO puede loguear). Los médicos
+  // pre-existentes se backfillean como verificados en la migración.
+  emailVerifiedAt DateTime? @db.Timestamptz()
+  // Token de verificación: se guarda SOLO el sha256 del token que viajó por mail
+  // (nunca el token plano), con vencimiento. Un solo uso (se limpia al verificar).
+  verificationCodeHash  String?
+  verificationExpiresAt DateTime? @db.Timestamptz()
+
   programs              DoctorProgram[]
   enrolledPatients      PatientProgram[]
   notes                 PatientNote[]
   medicationReminders   MedicationReminder[]
 
+  @@index([verificationCodeHash])
   @@map("doctors")
 }
 

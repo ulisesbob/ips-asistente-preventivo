@@ -6,6 +6,7 @@ import { requireAuth } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error-handler';
 import { config } from '../config/env';
 import * as authService from '../services/auth.service';
+import * as registrationService from '../services/registration.service';
 import { UnauthorizedError } from '../utils/errors';
 
 const router = Router();
@@ -21,6 +22,20 @@ const authLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
+// Limiter del auto-registro / verificación. A diferencia del de login, NO saltea
+// los exitosos: cada registro "exitoso" dispara un mail, así que hay que contarlos
+// para frenar spam de correos (reputación SMTP) y fuerza bruta de tokens.
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hora
+  max: 5,
+  message: { status: 'error', message: 'Demasiados intentos, probá de nuevo más tarde' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  // En tests no aplicamos rate-limit (las requests de la suite comparten IP y no
+  // son un ataque). Queda activo en development y production.
+  skip: () => config.NODE_ENV === 'test',
+});
+
 // ─── Schemas ────────────────────────────────────────────────────────────────
 
 const loginSchema = z.object({
@@ -30,6 +45,17 @@ const loginSchema = z.object({
 
 const refreshSchema = z.object({
   refreshToken: z.string().optional(),
+});
+
+const registerSchema = z.object({
+  fullName: z.string().min(2, 'El nombre debe tener al menos 2 caracteres').max(200),
+  licenseNumber: z.string().min(2, 'La matrícula es requerida').max(50),
+  email: z.string().email('Email inválido'),
+  password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres').max(128),
+});
+
+const verifyEmailSchema = z.object({
+  token: z.string().min(1, 'Token requerido').max(512),
 });
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -63,6 +89,45 @@ router.post(
         accessToken: result.accessToken,
         doctor: result.doctor,
       },
+    });
+  })
+);
+
+// ─── POST /api/auth/register — auto-registro de médicos ──────────────────────
+
+router.post(
+  '/register',
+  registerLimiter,
+  validate(registerSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = req.body as z.infer<typeof registerSchema>;
+
+    // La respuesta es SIEMPRE genérica (no revela si el email ya existía).
+    const result = await registrationService.registerDoctor(body);
+
+    res.status(201).json({
+      status: 'ok',
+      data: result,
+    });
+  })
+);
+
+// ─── POST /api/auth/verify-email — confirma el email del registro ────────────
+
+router.post(
+  '/verify-email',
+  registerLimiter,
+  validate(verifyEmailSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { token } = req.body as z.infer<typeof verifyEmailSchema>;
+
+    await registrationService.verifyEmail(token);
+
+    // Mismo shape que /register ({status:'ok', data:{message}}) para que el
+    // frontend use el cliente HTTP estándar (apiPost) de forma consistente.
+    res.status(200).json({
+      status: 'ok',
+      data: { message: 'Email verificado. Ya podés iniciar sesión.' },
     });
   })
 );

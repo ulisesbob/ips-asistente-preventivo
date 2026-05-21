@@ -17,3 +17,6 @@ process.env.JWT_REFRESH_EXPIRES_IN = '7d';
 process.env.PRISMA_FIELD_ENCRYPTION_KEY =
   process.env.PRISMA_FIELD_ENCRYPTION_KEY ||
   'k1.aesgcm256.lEUt2MurZ4ysQVN5mZW3EckuX6oqTe2-fR4eWsfze2g=';
+// Auto-registro de médicos: dominios institucionales habilitados (para tests).
+process.env.ALLOWED_DOCTOR_EMAIL_DOMAINS =
+  process.env.ALLOWED_DOCTOR_EMAIL_DOMAINS || 'ips.gob.ar,salud.misiones.gob.ar';
