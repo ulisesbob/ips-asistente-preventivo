@@ -1,8 +1,18 @@
+import type PgBoss from 'pg-boss';
 import { prisma, Role } from '@ips/db';
 import { NotFoundError, ValidationError } from '../utils/errors';
 import { sendTextMessage } from './messaging.service';
-import { maskPhone, firstName } from '../utils/pii';
+import { maskPhone, maskId, firstName } from '../utils/pii';
 import { toMetaSendablePhone } from '../utils/phone';
+import { config } from '../config/env';
+import { logger } from '../utils/logger';
+import { getBoss } from '../queue/boss';
+import { limiter } from '../queue/limiter';
+import {
+  QUEUE_NAMES,
+  medicationSingletonKey,
+  type MedicationJobPayload,
+} from '../queue/queues';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -266,25 +276,73 @@ export async function getMedicationsForBot(patientId: string) {
 
 // ─── CRON: Send medication reminders ────────────────────────────────────────
 
-export async function sendMedicationReminders(): Promise<{ sent: number; failed: number }> {
-  // Cron fires with timezone 'America/Argentina/Buenos_Aires' so we use
-  // Intl to get the current Argentina hour/minute (LESSONS #16: don't mix conventions)
-  const argFormatter = new Intl.DateTimeFormat('en-US', {
+const MED_MAX_PER_RUN = 200; // tope del camino viejo (LESSONS #13)
+const MED_RATE_LIMIT_MS = 100;
+// Tamaño de lote de la paginación del productor. No es un tope: itera hasta agotar.
+const MED_ENQUEUE_BATCH_SIZE = 200;
+
+/**
+ * Hora/slot actual en Argentina. El cron dispara a :00 y :30 → el slot es 0 o 30.
+ * LESSONS #16: no mezclar convenciones de timezone.
+ */
+function currentArgentinaSlot(): { argHour: number; slot: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
     hour: 'numeric', minute: 'numeric', hour12: false,
     timeZone: 'America/Argentina/Buenos_Aires',
-  });
-  const parts = argFormatter.formatToParts(new Date());
+  }).formatToParts(new Date());
   const argHour = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0');
   const argMinute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  return { argHour, slot: argMinute < 15 ? 0 : 30 };
+}
 
-  // Match the slot: cron fires at :00 and :30, so match exactly
-  const slot = argMinute < 15 ? 0 : 30;
+/** Fecha de hoy en Argentina como YYYY-MM-DD (ventana del singletonKey). */
+function todayArgentinaISO(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: 'America/Argentina/Buenos_Aires',
+  }).format(new Date());
+}
 
-  console.log(`[MedReminder] Checking for hour=${argHour} minute=${slot} (Argentina)`);
+/**
+ * `where` de recordatorios a enviar en este slot. Compartido entre el camino
+ * viejo (con `take`) y el productor de la cola (paginado sin tope).
+ */
+function medicationCandidateWhere(argHour: number, slot: number, today: Date) {
+  return {
+    active: true,
+    reminderHour: argHour,
+    reminderMinute: slot,
+    patient: {
+      consent: true,
+      phone: { not: null },
+    },
+    // Tratamiento continuo (endDate null) o aún vigente (endDate >= hoy).
+    AND: [{ OR: [{ endDate: null }, { endDate: { gte: today } }] }],
+  };
+}
 
-  // Desactivar tratamientos vencidos (endDate < hoy medianoche UTC) antes de
-  // seleccionar el slot, así no se manda ningún recordatorio caducado.
-  const today = todayUtcMidnight();
+/** Texto del recordatorio de medicación. Puro (exportado para tests). */
+export function buildMedicationMessage(
+  fullName: string,
+  medicationName: string,
+  dosage: string,
+  instructions: string | null
+): string {
+  const instructionsLine = instructions ? `📋 ${instructions}\n\n` : '';
+  return (
+    `Hola ${firstName(fullName)}! Te recuerdo que es hora de tomar tu medicación:\n\n` +
+    `💊 *${medicationName}* — ${dosage}\n\n` +
+    instructionsLine +
+    `¡Cuidá tu salud!`
+  );
+}
+
+/**
+ * Desactiva tratamientos vencidos (endDate < hoy medianoche UTC). Lo hacen tanto
+ * el camino viejo como el productor antes de seleccionar el slot, para no mandar
+ * recordatorios caducados.
+ */
+async function deactivateExpiredMedications(today: Date): Promise<void> {
   const deactivated = await prisma.medicationReminder.updateMany({
     where: { active: true, endDate: { lt: today } },
     data: { active: false },
@@ -292,20 +350,18 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
   if (deactivated.count > 0) {
     console.log(`[MedReminder] Deactivated ${deactivated.count} expired reminders.`);
   }
+}
+
+export async function sendMedicationReminders(): Promise<{ sent: number; failed: number }> {
+  const { argHour, slot } = currentArgentinaSlot();
+  console.log(`[MedReminder] Checking for hour=${argHour} minute=${slot} (Argentina)`);
+
+  const today = todayUtcMidnight();
+  await deactivateExpiredMedications(today);
 
   const reminders = await prisma.medicationReminder.findMany({
-    where: {
-      active: true,
-      reminderHour: argHour,
-      reminderMinute: slot,
-      patient: {
-        consent: true,
-        phone: { not: null },
-      },
-      // Tratamiento continuo (endDate null) o aún vigente (endDate >= hoy)
-      AND: [{ OR: [{ endDate: null }, { endDate: { gte: today } }] }],
-    },
-    take: 200, // LESSONS #13
+    where: medicationCandidateWhere(argHour, slot, today),
+    take: MED_MAX_PER_RUN,
     select: {
       id: true,
       medicationName: true,
@@ -331,13 +387,12 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
   for (const r of reminders) {
     if (!r.patient.phone) continue;
     const sendPhone = toMetaSendablePhone(r.patient.phone);
-
-    const instructionsLine = r.instructions ? `📋 ${r.instructions}\n\n` : '';
-    const message =
-      `Hola ${firstName(r.patient.fullName)}! Te recuerdo que es hora de tomar tu medicación:\n\n` +
-      `💊 *${r.medicationName}* — ${r.dosage}\n\n` +
-      instructionsLine +
-      `¡Cuidá tu salud!`;
+    const message = buildMedicationMessage(
+      r.patient.fullName,
+      r.medicationName,
+      r.dosage,
+      r.instructions
+    );
 
     try {
       await sendTextMessage(sendPhone, message);
@@ -348,9 +403,173 @@ export async function sendMedicationReminders(): Promise<{ sent: number; failed:
     }
 
     // Rate limit: 100ms between messages (LESSONS Meta rate limits)
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, MED_RATE_LIMIT_MS));
   }
 
   console.log(`[MedReminder] Sent ${sent}, failed ${failed}`);
   return { sent, failed };
+}
+
+// ─── Bloque B (T11): camino por cola pg-boss (detrás de QUEUE_MEDICATION) ──────
+//
+// PRODUCTOR: enqueueMedicationReminders desactiva vencidos, luego encola 1 job por
+// recordatorio del slot actual (sin tope, paginando). CONSUMIDOR:
+// makeMedicationHandler envía vía limiter. Particularidad: medicación NO muta
+// estado por envío, así que NO hay update post-envío.
+//
+// DIFERENCIA DE RAÍZ con followup/survey: el modelo MedicationReminder NO tiene
+// columna donde marcar "enviado" (no hay lastSentAt/dispatchedAt). Por eso la
+// idempotencia de capa 2 (no aplicar el efecto dos veces) NO PUEDE apoyarse en un
+// updateMany condicional como en followup (noProgramReminderCount) o survey
+// (dispatchedAt): acá depende 100% de la capa 1 (singletonKey). No es una omisión
+// del patrón — es lo que fuerza el dominio.
+//
+// Idempotencia:
+//   1) singletonKey (medication:{reminderId}:{date}:{HH:MM}) + policy 'short' →
+//      un único job por recordatorio/slot/día (no re-encola si el cron redispara).
+//   2) guard en el handler: re-lee active + no-vencido + consent. Un reintento de
+//      pg-boss tras un fallo de red reenvía (deseado para medicación, a diferencia
+//      de followup donde reenviar antes del intervalo sería spam). El único hueco
+//      es el doble envío ante crash post-send/pre-ack: at-least-once inherente, que
+//      el camino viejo YA tenía (nunca marcó "enviado") y que la cola incluso acota
+//      (el singletonKey impide re-encolar mientras el job vive). Un recordatorio de
+//      pastilla duplicado es molesto, no peligroso. El envío va FUERA de tx.
+
+/**
+ * Productor: encola un job por CADA recordatorio del slot actual, sin el tope
+ * `take` del camino viejo. Desactiva vencidos primero (mismo side-effect).
+ */
+export async function enqueueMedicationReminders(
+  boss: PgBoss = getBoss()
+): Promise<{ enqueued: number }> {
+  const { argHour, slot } = currentArgentinaSlot();
+  const today = todayUtcMidnight();
+  const date = todayArgentinaISO();
+
+  await deactivateExpiredMedications(today);
+
+  const where = medicationCandidateWhere(argHour, slot, today);
+
+  let enqueued = 0;
+  let cursor: string | undefined;
+
+  for (;;) {
+    const batch = await prisma.medicationReminder.findMany({
+      where,
+      take: MED_ENQUEUE_BATCH_SIZE,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        patientId: true,
+        patient: { select: { phone: true } },
+      },
+    });
+
+    if (batch.length === 0) break;
+
+    for (const r of batch) {
+      if (!r.patient.phone) continue;
+      const payload: MedicationJobPayload = {
+        reminderId: r.id,
+        patientId: r.patientId,
+        phone: toMetaSendablePhone(r.patient.phone),
+        date,
+        reminderHour: argHour,
+        reminderMinute: slot,
+      };
+      const id = await boss.send(QUEUE_NAMES.medication, payload, {
+        singletonKey: medicationSingletonKey(r.id, date, argHour, slot),
+        retryLimit: 5,
+        retryBackoff: true,
+      });
+      if (id) enqueued++;
+    }
+
+    cursor = batch[batch.length - 1].id;
+    if (batch.length < MED_ENQUEUE_BATCH_SIZE) break;
+  }
+
+  logger.info('medication reminders encolados', {
+    event: 'queue',
+    action: 'enqueue_medication',
+    enqueued,
+    argHour,
+    slot,
+  });
+
+  return { enqueued };
+}
+
+/** Forma mínima de un job que necesita el handler (compatible con PgBoss.Job). */
+type JobLike<T> = { id: string; data: T };
+
+/**
+ * Consumidor: construye el handler del worker `reminders:medication`.
+ * Guard re-lee el recordatorio (active + no-vencido + consent), envía FUERA de tx.
+ * NO muta estado (medicación no tiene marca de "enviado").
+ */
+export function makeMedicationHandler(): (
+  jobs: JobLike<MedicationJobPayload>[]
+) => Promise<void> {
+  return async (jobs: JobLike<MedicationJobPayload>[]): Promise<void> => {
+    for (const job of jobs) {
+      await processMedicationJob(job.data);
+    }
+  };
+}
+
+async function processMedicationJob(payload: MedicationJobPayload): Promise<void> {
+  const { reminderId, phone } = payload;
+  const today = todayUtcMidnight();
+
+  // GUARD: re-lee que el recordatorio sigue activo, no vencido y con consent. NO
+  // re-chequea el slot a propósito (un médico pudo editar la hora entre encolar y
+  // consumir; el mensaje sigue siendo válido para ese paciente).
+  const reminder = await prisma.medicationReminder.findFirst({
+    where: {
+      id: reminderId,
+      active: true,
+      patient: { consent: true, phone: { not: null } },
+      OR: [{ endDate: null }, { endDate: { gte: today } }],
+    },
+    select: {
+      id: true,
+      medicationName: true,
+      dosage: true,
+      instructions: true,
+      patient: { select: { fullName: true } },
+    },
+  });
+
+  if (!reminder) {
+    logger.info('medication skip — ya no es candidato (inactivo / vencido / sin consent)', {
+      event: 'queue',
+      action: 'medication_skip',
+      reminderId: maskId(reminderId),
+    });
+    return;
+  }
+
+  const message = buildMedicationMessage(
+    reminder.patient.fullName,
+    reminder.medicationName,
+    reminder.dosage,
+    reminder.instructions
+  );
+
+  if (config.QUEUE_SHADOW) {
+    logger.info('medication SHADOW — habría enviado', {
+      event: 'queue',
+      action: 'medication_shadow',
+      reminderId: maskId(reminderId),
+      phone: maskPhone(phone),
+    });
+    return;
+  }
+
+  const ok = await limiter.schedule(() => sendTextMessage(phone, message));
+  if (!ok) {
+    throw new Error('send_failed');
+  }
 }

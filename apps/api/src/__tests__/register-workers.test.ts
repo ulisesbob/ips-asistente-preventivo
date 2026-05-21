@@ -7,12 +7,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 //   - QUEUE_FOLLOWUP=false → NO registra worker de followup (solo dead-letter).
 //   - QUEUE_FOLLOWUP=true  → boss.work(reminders:followup, handler) + dead-letter.
 
-const mockConfig: { QUEUE_FOLLOWUP: boolean; QUEUE_SURVEY: boolean } = {
+const mockConfig: {
+  QUEUE_FOLLOWUP: boolean;
+  QUEUE_SURVEY: boolean;
+  QUEUE_MEDICATION: boolean;
+} = {
   QUEUE_FOLLOWUP: false,
   QUEUE_SURVEY: false,
+  QUEUE_MEDICATION: false,
 };
 const mockMakeFollowupHandler = vi.fn(() => async () => undefined);
 const mockMakeSurveyHandler = vi.fn(() => async () => undefined);
+const mockMakeMedicationHandler = vi.fn(() => async () => undefined);
 const mockRegisterDeadLetterHandler = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../config/env', () => ({ config: mockConfig }));
@@ -25,6 +31,10 @@ vi.mock('../services/survey.service', () => ({
   makeSurveyHandler: mockMakeSurveyHandler,
 }));
 
+vi.mock('../services/medication-reminder.service', () => ({
+  makeMedicationHandler: mockMakeMedicationHandler,
+}));
+
 vi.mock('../queue/send-worker', () => ({
   registerDeadLetterHandler: mockRegisterDeadLetterHandler,
 }));
@@ -33,6 +43,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockConfig.QUEUE_FOLLOWUP = false;
   mockConfig.QUEUE_SURVEY = false;
+  mockConfig.QUEUE_MEDICATION = false;
 });
 
 function makeFakeBoss() {
@@ -140,6 +151,32 @@ describe('registerQueueWorkers', () => {
     const workCalls = work.mock.calls.filter((c) => c[0] === 'reminders:survey');
     expect(workCalls).toHaveLength(1);
     expect(mockMakeSurveyHandler).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── T11: Medicación ─────────────────────────────────────────────────────────
+
+  it('medication OFF: NO registra worker ni crea cola de medication', async () => {
+    const { boss, work, createQueue } = makeFakeBoss();
+    const { registerQueueWorkers } = await import('../queue/register-workers');
+    await registerQueueWorkers(boss);
+
+    expect(work.mock.calls.filter((c) => c[0] === 'reminders:medication')).toHaveLength(0);
+    expect(createQueue.mock.calls.filter((c) => c[0] === 'reminders:medication')).toHaveLength(0);
+  });
+
+  it('medication ON: crea cola reminders:medication (short + deadLetter) y registra su worker', async () => {
+    mockConfig.QUEUE_MEDICATION = true;
+    const { boss, work, createQueue } = makeFakeBoss();
+    const { registerQueueWorkers } = await import('../queue/register-workers');
+    await registerQueueWorkers(boss);
+
+    const createCalls = createQueue.mock.calls.filter((c) => c[0] === 'reminders:medication');
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0][1]).toMatchObject({ policy: 'short', deadLetter: 'reminders:dead' });
+
+    const workCalls = work.mock.calls.filter((c) => c[0] === 'reminders:medication');
+    expect(workCalls).toHaveLength(1);
+    expect(mockMakeMedicationHandler).toHaveBeenCalledTimes(1);
   });
 
   it('C1: createQueue de followup ocurre ANTES de work(followup)', async () => {
