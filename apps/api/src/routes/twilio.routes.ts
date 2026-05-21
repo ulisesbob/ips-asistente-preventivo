@@ -42,10 +42,17 @@ const MAX_MESSAGE_LENGTH = 2000;
  */
 export type TwilioWebhookKind = 'status' | 'ignore' | 'text' | 'unsupported';
 
+// Estados de ENTREGA de un mensaje SALIENTE (status callbacks). CLAVE: Twilio
+// manda SmsStatus="received" en TODO mensaje ENTRANTE, así que NO se puede tratar
+// la sola presencia de SmsStatus/MessageStatus como callback — hay que mirar el
+// VALOR. "received" (o vacío) = mensaje entrante real.
+const DELIVERY_STATUSES = ['queued', 'sending', 'sent', 'delivered', 'read', 'failed', 'undelivered'];
+
 export function classifyTwilioWebhook(
   params: Record<string, string | undefined>
 ): TwilioWebhookKind {
-  if (params.MessageStatus || params.SmsStatus) return 'status';
+  const status = (params.MessageStatus ?? params.SmsStatus ?? '').toLowerCase();
+  if (DELIVERY_STATUSES.includes(status)) return 'status';
   if (!params.MessageSid || !params.From) return 'ignore';
   if ((params.Body ?? '').trim()) return 'text';
   return 'unsupported';
