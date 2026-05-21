@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import { prisma, Role, Prisma } from '@ips/db';
+import { prisma, Role, DoctorStatus, Prisma } from '@ips/db';
 import { NotFoundError, ConflictError, ValidationError } from '../utils/errors';
 import { normalizeEmail } from '../utils/email';
 
@@ -31,6 +31,9 @@ export async function listDoctors() {
       fullName: true,
       email: true,
       role: true,
+      licenseNumber: true,
+      status: true,
+      emailVerifiedAt: true,
       createdAt: true,
       programs: {
         select: {
@@ -46,6 +49,44 @@ export async function listDoctors() {
   });
 
   return doctors;
+}
+
+// ─── Aprobar / rechazar un auto-registro ─────────────────────────────────────
+
+export async function reviewDoctor(doctorId: string, status: DoctorStatus) {
+  const target = await prisma.doctor.findUnique({
+    where: { id: doctorId },
+    select: { id: true, role: true },
+  });
+  if (!target) {
+    throw new NotFoundError('Médico no encontrado');
+  }
+  // No se aprueba/rechaza a administradores: no pasan por el auto-registro, y así
+  // se evita que un admin se auto-rechace y quede afuera del sistema (lockout).
+  if (target.role === Role.ADMIN) {
+    throw new ValidationError('No se puede aprobar ni rechazar a un administrador.');
+  }
+
+  const updated = await prisma.doctor.update({
+    where: { id: doctorId },
+    data: {
+      status,
+      // Al RECHAZAR, revocar las sesiones vivas (si el médico ya había entrado)
+      // bumpeando tokenVersion: corta el acceso al instante, no recién en 7 días.
+      ...(status === DoctorStatus.REJECTED ? { tokenVersion: { increment: 1 } } : {}),
+    },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      role: true,
+      licenseNumber: true,
+      status: true,
+      createdAt: true,
+    },
+  });
+
+  return updated;
 }
 
 // ─── POST /doctors ──────────────────────────────────────────────────────────
@@ -64,8 +105,9 @@ export async function createDoctor(input: DoctorCreateInput) {
       passwordHash,
       role: input.role ?? Role.DOCTOR,
       // Alta por admin: el admin da fe de la identidad, no hay verificación por
-      // mail. Sin esto, el gate de login (auth.service) lo bloquearía para siempre.
+      // mail ni aprobación pendiente. Sin esto, los gates de login lo bloquearían.
       emailVerifiedAt: new Date(),
+      status: DoctorStatus.APPROVED,
     },
     select: {
       id: true,

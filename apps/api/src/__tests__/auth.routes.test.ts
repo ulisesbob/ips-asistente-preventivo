@@ -15,6 +15,7 @@ vi.mock('@ips/db', () => ({
     ADMIN: 'ADMIN',
     DOCTOR: 'DOCTOR',
   },
+  DoctorStatus: { PENDING: 'PENDING', APPROVED: 'APPROVED', REJECTED: 'REJECTED' },
   RegisteredVia: {
     PANEL: 'PANEL',
     BOT: 'BOT',
@@ -189,6 +190,8 @@ describe('Auth Routes', () => {
         id: testDoctor.id,
         email: testDoctor.email,
         role: testDoctor.role,
+        status: 'APPROVED',
+        emailVerifiedAt: new Date(),
       });
 
       const refreshToken = validRefreshToken();
@@ -228,9 +231,9 @@ describe('Auth Routes', () => {
         email: testDoctor.email,
         role: testDoctor.role,
       };
-      // requireAuth calls findUnique, then getMe calls findUnique again
+      // requireAuth calls findUnique (needs tokenVersion + status), then getMe again
       mockFindUnique
-        .mockResolvedValueOnce(profile) // requireAuth lookup
+        .mockResolvedValueOnce({ ...profile, tokenVersion: 0, status: 'APPROVED' }) // requireAuth
         .mockResolvedValueOnce(profile); // getMe lookup
 
       const token = validAccessToken();
@@ -241,6 +244,24 @@ describe('Auth Routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.doctor.email).toBe(testDoctor.email);
+    });
+
+    it('returns 403 si el doctor ya no está APPROVED (gate en cada request)', async () => {
+      mockFindUnique.mockResolvedValueOnce({
+        id: testDoctor.id,
+        email: testDoctor.email,
+        role: testDoctor.role,
+        fullName: testDoctor.fullName,
+        tokenVersion: 0,
+        status: 'REJECTED',
+      });
+      const token = validAccessToken();
+
+      const res = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).toBe(403);
     });
 
     it('returns 401 without token', async () => {

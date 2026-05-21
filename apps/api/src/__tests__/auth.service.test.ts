@@ -12,6 +12,7 @@ vi.mock('@ips/db', () => ({
     ADMIN: 'ADMIN',
     DOCTOR: 'DOCTOR',
   },
+  DoctorStatus: { PENDING: 'PENDING', APPROVED: 'APPROVED', REJECTED: 'REJECTED' },
   Prisma: {
     PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
       code: string;
@@ -102,6 +103,26 @@ describe('AuthService', () => {
       ).rejects.toThrow(ForbiddenError);
     });
 
+    it('rechaza login con ForbiddenError si verificó el email pero NO está aprobado', async () => {
+      mockFindUnique.mockResolvedValueOnce({ ...testDoctor, status: 'PENDING' });
+      mockBcryptCompare.mockResolvedValueOnce(true); // password correcta + email verificado
+
+      await expect(authService.login(testDoctor.email, 'Test1234!')).rejects.toThrow(ForbiddenError);
+    });
+
+    it('permite login si el email está verificado y el status es APPROVED', async () => {
+      mockFindUnique.mockResolvedValueOnce({
+        ...testDoctor,
+        emailVerifiedAt: new Date(),
+        status: 'APPROVED',
+      });
+      mockBcryptCompare.mockResolvedValueOnce(true);
+
+      const result = await authService.login(testDoctor.email, 'Test1234!');
+      expect(result.accessToken).toBeDefined();
+      expect(result.doctor.email).toBe(testDoctor.email);
+    });
+
     it('email no verificado + password incorrecta falla como UnauthorizedError (no revela el motivo)', async () => {
       mockFindUnique.mockResolvedValueOnce(unverifiedDoctor);
       mockBcryptCompare.mockResolvedValueOnce(false);
@@ -179,6 +200,8 @@ describe('AuthService', () => {
         id: testDoctor.id,
         email: testDoctor.email,
         role: testDoctor.role,
+        status: 'APPROVED',
+        emailVerifiedAt: new Date(),
       });
 
       const refreshToken = makeRefreshToken();
@@ -237,6 +260,8 @@ describe('AuthService', () => {
         email: testDoctor.email,
         role: testDoctor.role,
         tokenVersion: 3,
+        status: 'APPROVED',
+        emailVerifiedAt: new Date(),
       });
 
       const refreshToken = makeRefreshToken({ tv: 3 });

@@ -11,6 +11,7 @@ vi.mock('@ips/db', () => ({
     },
   },
   Role: { ADMIN: 'ADMIN', DOCTOR: 'DOCTOR' },
+  DoctorStatus: { PENDING: 'PENDING', APPROVED: 'APPROVED', REJECTED: 'REJECTED' },
   Prisma: {
     PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
       code: string;
@@ -109,6 +110,19 @@ describe('parseAllowedDomains', () => {
   });
 });
 
+describe('isValidEmailFormat', () => {
+  it('acepta cualquier email bien formado (gmail incluido)', () => {
+    expect(registration.isValidEmailFormat('juan@gmail.com')).toBe(true);
+    expect(registration.isValidEmailFormat('  Juan.Perez@hotmail.com ')).toBe(true);
+  });
+  it('rechaza formatos inválidos', () => {
+    expect(registration.isValidEmailFormat('no-es-email')).toBe(false);
+    expect(registration.isValidEmailFormat('a@b@c.com')).toBe(false);
+    expect(registration.isValidEmailFormat('a@b.com\nx')).toBe(false);
+    expect(registration.isValidEmailFormat('')).toBe(false);
+  });
+});
+
 // ─── B. registerDoctor: password, rol, creación ───────────────────────────────
 
 describe('registerDoctor', () => {
@@ -143,6 +157,11 @@ describe('registerDoctor', () => {
     expect(data.emailVerifiedAt).toBeNull();
     expect(data.passwordHash).toBe('hashed-password');
     expect(data).not.toHaveProperty('password');
+  });
+
+  it('crea con status PENDING (espera aprobación de un admin)', async () => {
+    await registration.registerDoctor(registerDoctorInput());
+    expect(mockCreate.mock.calls[0][0].data.status).toBe('PENDING');
   });
 
   it('guarda sólo el HASH del token (sha256, 64 hex), nunca el token plano', async () => {

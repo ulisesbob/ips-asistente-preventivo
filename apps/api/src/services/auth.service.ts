@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { prisma, Role } from '@ips/db';
+import { prisma, Role, DoctorStatus } from '@ips/db';
 import { config } from '../config/env';
 import { UnauthorizedError, NotFoundError, ForbiddenError } from '../utils/errors';
 import { normalizeEmail } from '../utils/email';
@@ -65,6 +65,7 @@ export async function login(email: string, password: string): Promise<LoginResul
       passwordHash: true,
       tokenVersion: true,
       emailVerifiedAt: true,
+      status: true,
     },
   });
 
@@ -82,6 +83,14 @@ export async function login(email: string, password: string): Promise<LoginResul
   if (!doctor.emailVerifiedAt) {
     throw new ForbiddenError(
       'Verificá tu email antes de iniciar sesión. Te enviamos un link cuando te registraste.'
+    );
+  }
+
+  // Gate de aprobación: aunque el email esté verificado, un admin tiene que
+  // habilitar la cuenta (así garantizamos que sea realmente un médico).
+  if (doctor.status !== DoctorStatus.APPROVED) {
+    throw new ForbiddenError(
+      'Tu cuenta todavía no fue habilitada por un administrador. Te avisaremos cuando esté aprobada.'
     );
   }
 
@@ -127,7 +136,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
   // Verify doctor still exists
   const doctor = await prisma.doctor.findUnique({
     where: { id: payload.sub },
-    select: { id: true, email: true, role: true, tokenVersion: true },
+    select: { id: true, email: true, role: true, tokenVersion: true, status: true, emailVerifiedAt: true },
   });
 
   if (!doctor) {
@@ -138,6 +147,12 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
   // fue invalidado por un logout (o cambio de password). Audit #4.
   if ((payload.tv ?? 0) !== (doctor.tokenVersion ?? 0)) {
     throw new UnauthorizedError('Sesión expirada, iniciá sesión de nuevo');
+  }
+
+  // Defensa en profundidad: no renovar el acceso si la cuenta dejó de estar
+  // habilitada (email sin verificar o no aprobada / rechazada).
+  if (!doctor.emailVerifiedAt || doctor.status !== DoctorStatus.APPROVED) {
+    throw new UnauthorizedError('Sesión no válida, iniciá sesión de nuevo');
   }
 
   const newPayload: TokenPayload = {

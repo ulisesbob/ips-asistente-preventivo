@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
-import { prisma, Role, Prisma } from '@ips/db';
+import { prisma, Role, DoctorStatus, Prisma } from '@ips/db';
 import { config } from '../config/env';
 import { ValidationError, ServiceUnavailableError } from '../utils/errors';
 import { normalizeEmail } from '../utils/email';
@@ -9,9 +9,11 @@ import { sendVerificationEmail } from './email.service';
 // ─── Auto-registro de médicos ────────────────────────────────────────────────
 //
 // El médico se da de alta solo. Controles de seguridad (sistema de salud, ley
-// 25.326): (1) el email DEBE ser de un dominio institucional habilitado; (2) se
-// verifica que el email sea realmente suyo vía link; (3) hasta verificar NO puede
-// loguear (ver auth.service.login); (4) el rol siempre es DOCTOR (nunca ADMIN).
+// 25.326): (1) el dominio institucional es un filtro OPCIONAL — el control de "es
+// médico real" lo hace la APROBACIÓN de un admin (status PENDING→APPROVED); (2) se
+// verifica que el email sea realmente suyo vía link; (3) hasta verificar Y ser
+// aprobado NO puede loguear (ver auth.service.login); (4) el rol siempre es DOCTOR
+// (nunca ADMIN) y nace PENDING.
 
 const SALT_ROUNDS = 10;
 const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24h
@@ -20,7 +22,7 @@ const TOKEN_BYTES = 32; // ~43 chars base64url
 // Respuesta SIEMPRE genérica: no revela si el email ya existía (anti-enumeración).
 const GENERIC_OK = {
   message:
-    'Si el email pertenece a IPS y no estaba registrado, te enviamos un link de verificación. Revisá tu casilla.',
+    'Listo. Si el email es válido, te enviamos un link para verificarlo. Una vez verificado, un administrador revisa tu cuenta antes de habilitarte el acceso.',
 } as const;
 
 // Formato de email ASCII, un solo @, sin whitespace (\s cubre \n/\r/tab → bloquea
@@ -49,18 +51,23 @@ export function parseAllowedDomains(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
-/**
- * ¿El email pertenece a uno de los dominios habilitados? Match EXACTO del dominio
- * (sin wildcard ni `endsWith`), tras validar formato. Fail-closed: si la lista
- * está vacía, rechaza todo.
- */
-export function isInstitutionalEmail(rawEmail: string, allowedDomains: string[]): boolean {
+/** Valida sólo el FORMATO del email (ASCII, un solo @, sin whitespace/CRLF). */
+export function isValidEmailFormat(rawEmail: string): boolean {
   if (typeof rawEmail !== 'string') return false;
-  if (allowedDomains.length === 0) return false; // fail-closed
   const email = rawEmail.trim();
   if (!ASCII_PRINTABLE_RE.test(email)) return false; // anti homoglyph / control chars
-  if (!EMAIL_RE.test(email)) return false; // un solo @, sin whitespace
-  const domain = email.slice(email.lastIndexOf('@') + 1).toLowerCase();
+  return EMAIL_RE.test(email); // un solo @, sin whitespace
+}
+
+/**
+ * ¿El email pertenece a uno de los dominios habilitados? Match EXACTO del dominio
+ * (sin wildcard ni `endsWith`), tras validar formato. Es un filtro OPCIONAL: con
+ * lista vacía devuelve false, y registerDoctor sólo lo aplica si hay dominios.
+ */
+export function isInstitutionalEmail(rawEmail: string, allowedDomains: string[]): boolean {
+  if (allowedDomains.length === 0) return false; // sin lista, ningún dominio es "institucional"
+  if (!isValidEmailFormat(rawEmail)) return false;
+  const domain = rawEmail.trim().slice(rawEmail.trim().lastIndexOf('@') + 1).toLowerCase();
   return allowedDomains.map((d) => d.toLowerCase()).includes(domain);
 }
 
@@ -71,11 +78,15 @@ function hashToken(token: string): string {
 // ─── registerDoctor ──────────────────────────────────────────────────────────
 
 export async function registerDoctor(input: RegisterDoctorInput): Promise<RegisterResult> {
+  // Formato siempre. El dominio es un filtro OPCIONAL: si hay dominios configurados
+  // se restringe a esos; si no, se acepta cualquier email — el control de "es médico"
+  // lo hace la aprobación del admin (status PENDING → APPROVED), no el dominio.
+  if (!isValidEmailFormat(input.email)) {
+    throw new ValidationError('El email no tiene un formato válido.');
+  }
   const allowed = parseAllowedDomains(config.ALLOWED_DOCTOR_EMAIL_DOMAINS);
-  if (!isInstitutionalEmail(input.email, allowed)) {
-    throw new ValidationError(
-      'El email debe pertenecer a un dominio institucional de IPS habilitado.'
-    );
+  if (allowed.length > 0 && !isInstitutionalEmail(input.email, allowed)) {
+    throw new ValidationError('El email debe pertenecer a un dominio institucional habilitado.');
   }
   if (typeof input.password !== 'string' || input.password.length < 8) {
     throw new ValidationError('La contraseña debe tener al menos 8 caracteres');
@@ -127,6 +138,7 @@ export async function registerDoctor(input: RegisterDoctorInput): Promise<Regist
           passwordHash,
           licenseNumber,
           role: Role.DOCTOR, // FORZADO: el alta pública jamás crea administradores.
+          status: DoctorStatus.PENDING, // queda esperando aprobación de un admin
           emailVerifiedAt: null,
           verificationCodeHash,
           verificationExpiresAt,

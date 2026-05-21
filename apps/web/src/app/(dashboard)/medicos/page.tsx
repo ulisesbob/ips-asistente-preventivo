@@ -12,6 +12,10 @@ import {
   BookOpen,
   Loader2,
   ShieldAlert,
+  Check,
+  Clock,
+  MailCheck,
+  MailX,
 } from 'lucide-react';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
@@ -22,11 +26,16 @@ interface DoctorProgram {
   program: { id: string; name: string };
 }
 
+type DoctorStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
 interface Doctor {
   id: string;
   fullName: string;
   email: string;
   role: 'ADMIN' | 'DOCTOR';
+  licenseNumber: string | null;
+  status: DoctorStatus;
+  emailVerifiedAt: string | null;
   createdAt: string;
   programs: DoctorProgram[];
 }
@@ -90,14 +99,24 @@ export default function MedicosPage() {
   const [editDoctor, setEditDoctor] = useState<Doctor | null>(null);
   const [programsDoctor, setProgramsDoctor] = useState<Doctor | null>(null);
 
+  // Approval flow state
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [approvalError, setApprovalError] = useState('');
+  const [approvalNotice, setApprovalNotice] = useState('');
+
   // ── Fetch doctors ─────────────────────────────────────────────────────────
 
   const fetchDoctors = useCallback(async () => {
     try {
       const res = await apiGet<{ doctors: Doctor[] }>('/api/doctors');
       setDoctors(res.doctors);
-    } catch {
-      // silent
+    } catch (err) {
+      // No tragar el error: un fallo de red no debe verse como "no hay médicos".
+      setApprovalError(
+        err instanceof ApiError
+          ? err.message
+          : 'No se pudieron cargar los médicos. Recargá la página.',
+      );
     } finally {
       setLoading(false);
     }
@@ -106,6 +125,42 @@ export default function MedicosPage() {
   useEffect(() => {
     fetchDoctors();
   }, [fetchDoctors]);
+
+  // ── Approve / reject pending doctors ────────────────────────────────────────
+
+  async function handleApproval(doctor: Doctor, action: 'approve' | 'reject') {
+    setReviewingId(doctor.id);
+    setApprovalError('');
+    setApprovalNotice('');
+    try {
+      const res = await apiPost<{ doctor: Doctor }>(
+        `/api/doctors/${doctor.id}/${action}`,
+      );
+      // Update the doctor in-place with the server response
+      setDoctors((prev) =>
+        prev.map((d) =>
+          d.id === doctor.id ? { ...d, ...res.doctor } : d,
+        ),
+      );
+      setApprovalNotice(
+        action === 'approve'
+          ? `${doctor.fullName} fue aprobado.`
+          : `${doctor.fullName} fue rechazado.`,
+      );
+    } catch (err) {
+      setApprovalError(
+        err instanceof ApiError
+          ? err.message
+          : action === 'approve'
+            ? 'Error al aprobar el médico.'
+            : 'Error al rechazar el médico.',
+      );
+    } finally {
+      setReviewingId(null);
+    }
+  }
+
+  const pendingDoctors = doctors.filter((d) => d.status === 'PENDING');
 
   // Fetch programs once (for assign dialog)
   useEffect(() => {
@@ -146,6 +201,102 @@ export default function MedicosPage() {
         </button>
       </div>
 
+      {/* ── Pendientes de aprobación ─────────────────────────────────────────── */}
+      {!loading && (
+        <section className="bg-white rounded-lg border border-amber-200 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-200 bg-amber-50/60">
+            <Clock className="w-4 h-4 text-amber-600" />
+            <h2 className="text-sm font-semibold text-foreground">
+              Pendientes de aprobación
+            </h2>
+            {pendingDoctors.length > 0 && (
+              <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-amber-100 text-amber-700 text-xs font-medium">
+                {pendingDoctors.length}
+              </span>
+            )}
+          </div>
+
+          {approvalNotice && (
+            <p
+              role="status"
+              className="text-sm text-green-700 bg-green-50 border-b border-green-200 px-4 py-2"
+            >
+              {approvalNotice}
+            </p>
+          )}
+          {approvalError && (
+            <p
+              role="alert"
+              className="text-sm text-red-600 bg-red-50 border-b border-red-200 px-4 py-2"
+            >
+              {approvalError}
+            </p>
+          )}
+
+          {pendingDoctors.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+              No hay registros pendientes
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {pendingDoctors.map((doc) => {
+                const busy = reviewingId === doc.id;
+                return (
+                  <li
+                    key={doc.id}
+                    className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">
+                        {doc.fullName}
+                      </p>
+                      <p className="text-sm text-muted-foreground truncate">
+                        {doc.email}
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="text-xs text-muted-foreground">
+                          Matrícula:{' '}
+                          <span className="text-foreground">
+                            {doc.licenseNumber ?? 'Sin matrícula'}
+                          </span>
+                        </span>
+                        <EmailVerifiedBadge verifiedAt={doc.emailVerifiedAt} />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleApproval(doc, 'approve')}
+                        disabled={busy}
+                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                      >
+                        {busy ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Check className="w-4 h-4" />
+                        )}
+                        Aprobar
+                      </button>
+                      <button
+                        onClick={() => handleApproval(doc, 'reject')}
+                        disabled={busy}
+                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-red-200 text-red-600 text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                      >
+                        {busy ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <X className="w-4 h-4" />
+                        )}
+                        Rechazar
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-lg border border-border overflow-hidden">
         <div className="overflow-x-auto">
@@ -162,6 +313,12 @@ export default function MedicosPage() {
                   Rol
                 </th>
                 <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">
+                  Estado
+                </th>
+                <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">
+                  Matrícula
+                </th>
+                <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">
                   Programas
                 </th>
                 <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">
@@ -176,7 +333,7 @@ export default function MedicosPage() {
               {loading ? (
                 [...Array(5)].map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={6} className="px-4 py-3">
+                    <td colSpan={8} className="px-4 py-3">
                       <div className="h-4 bg-slate-100 rounded animate-pulse" />
                     </td>
                   </tr>
@@ -195,6 +352,14 @@ export default function MedicosPage() {
                     </td>
                     <td className="px-4 py-3">
                       <RoleBadge role={doc.role} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={doc.status} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                      {doc.licenseNumber ?? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
@@ -242,7 +407,7 @@ export default function MedicosPage() {
               ) : (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={8}
                     className="px-4 py-12 text-center text-sm text-muted-foreground"
                   >
                     No hay médicos registrados
@@ -301,6 +466,53 @@ function RoleBadge({ role }: { role: 'ADMIN' | 'DOCTOR' }) {
       className={`inline-flex text-xs px-2 py-0.5 rounded border ${styles}`}
     >
       {role === 'ADMIN' ? 'Administrador' : 'Médico'}
+    </span>
+  );
+}
+
+// ── Status badge ────────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: DoctorStatus }) {
+  const config: Record<DoctorStatus, { label: string; styles: string }> = {
+    PENDING: {
+      label: 'Pendiente',
+      styles: 'bg-amber-50 text-amber-700 border-amber-200',
+    },
+    APPROVED: {
+      label: 'Aprobado',
+      styles: 'bg-green-50 text-green-700 border-green-200',
+    },
+    REJECTED: {
+      label: 'Rechazado',
+      styles: 'bg-red-50 text-red-700 border-red-200',
+    },
+  };
+  const { label, styles } = config[status];
+
+  return (
+    <span
+      className={`inline-flex text-xs px-2 py-0.5 rounded border ${styles}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ── Email verified badge ────────────────────────────────────────────────────────
+
+function EmailVerifiedBadge({ verifiedAt }: { verifiedAt: string | null }) {
+  if (verifiedAt) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-green-700">
+        <MailCheck className="w-3.5 h-3.5" />
+        Email verificado
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+      <MailX className="w-3.5 h-3.5" />
+      Email sin verificar
     </span>
   );
 }
