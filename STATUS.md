@@ -1,12 +1,19 @@
 # IPS — Asistente Preventivo para Pacientes Crónicos
 
 ## Estado actual
-- **Último paso completado:** Paso 19 — Recordatorios autogestivos del paciente
-- **Estado:** PRODUCCIÓN ACTIVA — Render (API) + Vercel (Panel) + WhatsApp Bot
+- **Estado:** PRODUCCIÓN ACTIVA — Render (API) + Vercel (Panel) + WhatsApp Bot (Twilio)
+- **Último hito:** Bloque medicación (duración + instrucciones + efectos secundarios) deployado a producción
+- **Compliance ley 25.326:** ACTIVO — audit log, cifrado en reposo de PII clínica, consentimiento trazable, soft-delete
+- **Observabilidad:** Sentry activo en la API (sin PII)
 - **Bot:** Claude Sonnet 4.6 + fallback Haiku 4.5, personalidad "Ana", 30 FAQs reales IPS
-- **UptimeRobot:** Configurado — ping cada 5 min a /health
-- **Bloqueadores:** Ninguno activo
-- **Fecha:** 10 de abril de 2026
+- **Bloqueadores:** Ninguno técnico. Pendiente de seguridad: rotar contraseña de la DB (ver Pendientes).
+- **Fecha:** 21 de mayo de 2026
+
+### URLs / accesos
+- **API (Render):** https://ips-asistente-preventivo.onrender.com — health: `/health`, `/health/deep`
+- **Panel (Vercel):** producción + previews por PR
+- **Repo:** github.com/ulisesbob/ips-asistente-preventivo — deploy automático en push a `main`
+- **DB:** Neon PostgreSQL (serverless). Backup del 2026-05-21 (pre-cifrado) en branch `br-damp-boat-amgjf82g`.
 
 ---
 
@@ -14,8 +21,8 @@
 
 Sistema para el IPS (Instituto de Previsión Social de Misiones) con dos partes:
 
-1. **Bot de WhatsApp con IA** — Atiende consultas de afiliados 24/7, envía recordatorios automáticos de controles y medicación, y permite al paciente crear sus propios recordatorios desde el chat.
-2. **Panel web para médicos** — Gestión de pacientes, programas de salud, recordatorios, conversaciones del bot, notas operativas, importación CSV, alertas y exportación de datos.
+1. **Bot de WhatsApp con IA** — Atiende consultas de afiliados 24/7, envía recordatorios automáticos de controles y medicación, hace seguimiento de pacientes sin programa, y permite al paciente crear sus propios recordatorios desde el chat.
+2. **Panel web para médicos** — Gestión de pacientes, programas, recordatorios de medicación (con duración e instrucciones), conversaciones, notas, importación CSV, alertas y exportación.
 
 ---
 
@@ -24,315 +31,143 @@ Sistema para el IPS (Instituto de Previsión Social de Misiones) con dos partes:
 | Capa | Tecnología |
 |------|-----------|
 | Backend | Node.js + TypeScript + Express |
-| Frontend | Next.js 14 (App Router) + Tailwind CSS + shadcn/ui |
+| Frontend | Next.js 14 (App Router) + Tailwind + Radix UI (base shadcn) + react-hook-form |
 | Base de datos | PostgreSQL (Neon serverless) + Prisma ORM |
+| Cifrado en reposo | prisma-field-encryption (AES-GCM 256) sobre campos de texto clínico |
 | IA | Claude Sonnet 4.6 (primario) + Haiku 4.5 (fallback) |
-| WhatsApp | Meta Cloud API (webhook + envío) |
-| Cron | node-cron (4 jobs activos) |
-| Deploy API | Render (Docker, node:20-alpine, dumb-init) |
-| Deploy Panel | Vercel (Next.js standalone) |
-| Monitoreo | UptimeRobot (ping /health cada 5 min) |
+| WhatsApp | **Twilio (activo)**; soporta Meta Cloud API vía `MESSAGING_PROVIDER` (Meta caído operacionalmente) |
+| Cron | node-cron (5 jobs activos) |
+| Observabilidad | Sentry (`@sentry/node`) en la API, con scrub de PII |
+| Deploy API | Render (Docker node:20-alpine, dumb-init). `prisma migrate deploy` automático al arrancar |
+| Deploy Panel | Vercel (Next.js) |
+| Monitoreo | UptimeRobot (ping /health) |
 
 ---
 
-## Features implementadas (26 en total)
+## Compliance ley 25.326 (datos de salud) — ACTIVO
+
+| Medida | Detalle |
+|--------|---------|
+| **Cifrado en reposo** | `Message.content` y `PatientNote.content` cifrados con AES-GCM (prisma-field-encryption). Key `PRISMA_FIELD_ENCRYPTION_KEY` en Render. Backfill de los 550 registros existentes hecho el 2026-05-21. |
+| **Audit log** | Tabla `audit_logs` — registra quién/qué/cuándo de cada escritura sensible (sin valores). |
+| **Consentimiento trazable** | `consent`, `consentAt`, `consentVia` (BOT/PANEL) por paciente. |
+| **Soft-delete** | Baja lógica de pacientes con reactivación por DNI (retención legal). |
+| **Revocación de sesiones** | Invalidación de JWT en logout / cambio de password. |
+| **Sentry sin PII** | `sendDefaultPii:false` + scrub de body/cookies/headers/query/user antes de enviar. `includeLocalVariables` desactivado a propósito. |
+
+---
+
+## Features
 
 ### Core (Pasos 1-10)
-| # | Feature | Descripción |
-|---|---------|-------------|
-| 1 | Monorepo + config | Workspaces npm, tsconfig compartido, .env |
-| 2 | Base de datos | 12 tablas PostgreSQL, Prisma ORM, migraciones |
-| 3 | API + Auth | Express REST, JWT (access 15min + refresh 7d), bcrypt, Zod |
-| 4 | Pacientes | CRUD, búsqueda, filtros, paginación, UPSERT por DNI |
-| 5 | Programas | 9 programas oficiales IPS, inscripciones, marcar control |
-| 6 | Bot WhatsApp | Registro por chat, AI conversacional, "BAJA"/"ALTA" |
-| 7 | Cron recordatorios | Diario 8AM, envía WA a pacientes con control vencido |
-| 8 | Panel — Core | Login, dashboard, lista pacientes, ficha paciente |
-| 9 | Panel — Admin | Programas, médicos, importar CSV, conversaciones |
-| 10 | Deploy | Docker multi-stage, CI/CD automático, seed producción |
+Monorepo, DB Prisma, API REST + Auth JWT, CRUD pacientes (UPSERT por DNI), 9 programas IPS, bot WhatsApp con registro por chat, cron de recordatorios, panel (login/dashboard/pacientes), panel admin (programas/médicos/CSV/conversaciones), deploy Docker + CI/CD.
 
-### Features avanzadas (Pasos 11-19)
-| # | Feature | Descripción |
-|---|---------|-------------|
-| 11 | Notas operativas | Médico agrega notas por paciente (max 500 chars, sin datos clínicos) |
-| 12 | Control editable | Médico cambia fecha de próximo control manualmente |
-| 13 | Alertas | Semáforo: control vencido (amarillo/rojo), sin respuesta, bajas |
-| 14 | Exportar CSV | Descarga filtrada de pacientes con sanitización anti-injection |
-| 15 | Editar paciente | Dialog para nombre, teléfono, fecha nacimiento, género |
-| 16 | Base de conocimiento | 30 FAQs reales del IPS, CRUD admin, bot las consulta por keywords |
-| 17 | Derivación humano | Escalamiento a operador, chat desde panel, indicador en nav |
-| 18 | Encuestas | Post-control: "¿Pudiste ir?" + rating 1-5, métricas en dashboard |
-| 19 | Recordatorios autogestivos | Paciente crea recordatorios diarios de medicación desde el bot |
+### Avanzadas (Pasos 11-19)
+Notas operativas, control editable, alertas semáforo, exportar CSV (anti-injection), editar paciente, base de conocimiento (30 FAQs reales), derivación a humano, encuestas post-control, recordatorios autogestivos del paciente.
 
-### Extras
+### Compliance y producción (mayo 2026)
 | Feature | Descripción |
 |---------|-------------|
-| Recordatorios de medicación | Diarios, configurados por médico o paciente, cron cada 30 min |
-| Bot "Ana" | Personalidad argentina, Sonnet 4.6 + retry 2x + fallback Haiku |
-| KB datos reales | Scrapeado de ipsmisiones.com.ar, 30 FAQs verificadas |
-| Deduplicación webhooks | Meta reenvía cuando el server estaba caído, Set in-memory |
-| Inscripción presencial | Bot explica cómo inscribirse, no inscribe (solo médico) |
+| Cifrado en reposo PII | AES-GCM sobre mensajes y notas clínicas + backfill |
+| Audit log + consentimiento | Trazabilidad ley 25.326 |
+| Soft-delete pacientes | Baja lógica + reactivación por DNI |
+| Seguimiento "sin programa" | Followup automático (cron) + alertas admin en el dashboard para pacientes registrados por bot que nadie inscribió |
+| Observabilidad (Sentry) | Captura de errores 5xx + fallback AI Sonnet→Haiku, sin PII |
+| **Medicación ampliada** | Duración del tratamiento (continuo / por X días, auto-apagado al vencer), instrucciones del médico (el bot las reenvía literal), campo de efectos secundarios (lo carga el médico; la IA nunca los genera) |
 
 ---
 
 ## Bot — Capacidades
 
-### Lo que el bot puede hacer
-- Responder preguntas sobre coberturas, trámites, programas, urgencias (30 FAQs)
-- Dar fechas exactas de próximo control y centros de atención
-- Informar medicación activa del paciente (nombre, dosis, horario)
-- Crear recordatorios diarios de medicación por pedido del paciente (flujo paso a paso)
-- Explicar cómo inscribirse presencialmente en programas
-- Escalar a operador humano cuando el paciente lo pide
-- Enviar encuestas de satisfacción post-control
-- Registrar pacientes nuevos (nombre + DNI → UPSERT)
-- Procesar "BAJA" (dejar de recibir mensajes) y "ALTA" (reactivar)
+### Hace
+- Responde FAQs (coberturas, trámites, programas, urgencias), da fechas de control y centros.
+- Informa medicación activa (nombre, dosis, horario) y manda recordatorios diarios **con las instrucciones del médico**.
+- Seguimiento de pacientes sin programa (hasta 3 recordatorios espaciados).
+- Crea recordatorios autogestivos, explica inscripción presencial, escala a humano, envía encuestas, registra pacientes (nombre+DNI), procesa BAJA/ALTA.
 
-### Lo que el bot NO hace (por diseño)
-- NUNCA evalúa síntomas ni recomienda tratamientos
-- NUNCA revela notas internas de médicos al paciente
-- NUNCA inscribe pacientes en programas (solo presencial)
-- NUNCA almacena datos clínicos (solo nombre, DNI, teléfono, programa, fechas)
-
-### Configuración técnica
-- Modelo primario: Claude Sonnet 4.6
-- Fallback: Claude Haiku 4.5 (si Sonnet está saturado)
-- Retry: 2 intentos con Sonnet, delay 2s, luego Haiku
-- Max tokens: 512 por respuesta
-- Historial: últimos 6 mensajes por conversación
-- Concurrencia: máx 50 llamadas AI simultáneas
-- Rate limit: 100ms entre envíos WhatsApp
+### NO hace (por diseño)
+- NUNCA evalúa síntomas ni recomienda tratamientos.
+- NUNCA genera/recita efectos secundarios — solo reenvía lo que el médico cargó.
+- NUNCA revela notas internas ni inscribe en programas.
 
 ---
 
-## Panel web — Pantallas
-
-| Pantalla | Acceso | Descripción |
-|----------|--------|-------------|
-| Login | Todos | Email + password, JWT httpOnly |
-| Dashboard | Todos | Pacientes activos, recordatorios enviados, alertas semáforo, encuestas |
-| Pacientes | Todos | Tabla con búsqueda nombre/DNI, filtros programa/estado, paginación |
-| Ficha paciente | Todos | Datos, programas, marcar control, recordatorios medicación, notas, conversaciones |
-| Programas | Admin | 9 programas IPS, editar template, centros de atención |
-| Médicos | Admin | CRUD médicos, asignar/desasignar programas |
-| Importar CSV | Admin | Drag & drop, preview, validación, UPSERT masivo |
-| Conversaciones | Todos | Chats del bot, filtro estado, responder escaladas |
-| Base de conocimiento | Admin | CRUD FAQs del IPS para el bot |
-
-### Roles y permisos
-| Acción | Admin | Doctor |
-|--------|-------|--------|
-| Ver todos los pacientes | ✅ | ❌ (solo sus programas) |
-| Crear/editar pacientes | ✅ | ✅ |
-| Importar CSV | ✅ | ❌ |
-| Gestionar médicos | ✅ | ❌ |
-| Editar programas | ✅ | ❌ |
-| Marcar control | ✅ | ✅ |
-| Ver conversaciones | ✅ | ✅ (sus programas) |
-| Gestionar KB | ✅ | ❌ |
-
----
-
-## Crons activos
+## Crons activos (5)
 
 | Cron | Frecuencia | Qué hace |
 |------|-----------|----------|
-| Recordatorios de controles | Diario 8:00 AM Argentina | Envía WA a pacientes con nextReminderDate vencida |
-| Recordatorios de medicación | Cada 30 min | Envía WA según hora configurada (médico o paciente) |
-| Encuestas post-control | Diario 10:00 AM Argentina | Envía encuesta WA 24h después de control marcado |
-| Recordatorios autogestivos | Cada 30 min | Envía recordatorios puntuales creados por pacientes |
+| Recordatorios de controles | Diario 8:00 AM AR | WA a pacientes con control vencido |
+| Recordatorios de medicación | Cada 30 min | WA según hora; incluye instrucciones; auto-apaga tratamientos vencidos |
+| Encuestas post-control | Diario 10:00 AM AR | Encuesta 24h después del control |
+| Recordatorios autogestivos | Cada 30 min | Recordatorios puntuales creados por el paciente |
+| Followup sin programa | Diario 10:30 AM AR | Hasta 3 avisos a pacientes registrados por bot sin programa |
 
 ---
 
-## Base de datos — 12 tablas
+## Base de datos — 13 tablas
 
-| Tabla | Propósito |
-|-------|----------|
-| doctors | Médicos/admins del panel |
-| doctor_programs | Asignación médico ↔ programa (M:N) |
-| patients | Afiliados del IPS |
-| programs | 9 programas oficiales de salud |
-| patient_programs | Inscripción paciente ↔ programa con fechas de control |
-| reminders | Historial de recordatorios enviados por cron |
-| conversations | Conversaciones del bot (OPEN/ESCALATED/CLOSED) |
-| messages | Mensajes individuales de cada conversación |
-| patient_notes | Notas operativas de médicos (max 500 chars) |
-| knowledge_base | FAQs del IPS para el bot (30 entradas) |
-| surveys | Encuestas post-control (asistencia + rating) |
-| medication_reminders | Recordatorios diarios de medicación (médico o paciente) |
-| patient_self_reminders | Recordatorios puntuales creados por el paciente |
-
----
-
-## API — Endpoints
-
-### Autenticación
-- `POST /api/auth/login` — Email + password → JWT
-- `POST /api/auth/refresh` — Renovar access token
-- `GET /api/auth/me` — Perfil del usuario actual
-
-### Pacientes
-- `GET /api/patients` — Listar con búsqueda, filtros, paginación
-- `GET /api/patients/:id` — Detalle con programas, recordatorios, conversaciones
-- `POST /api/patients` — Crear (UPSERT por DNI)
-- `PATCH /api/patients/:id` — Actualizar datos
-- `POST /api/patients/import` — Importar CSV
-- `GET /api/patients/export` — Exportar CSV filtrado
-- `GET /api/patients/:id/self-reminders` — Recordatorios autogestivos
-
-### Programas e inscripciones
-- `GET /api/programs` — Listar los 9 programas
-- `GET /api/programs/:id` — Detalle con pacientes inscriptos
-- `PATCH /api/programs/:id` — Editar template/centros
-- `POST /api/patients/:id/programs` — Inscribir paciente
-- `POST /api/patient-programs/:id/control` — Marcar control realizado
-- `PATCH /api/patient-programs/:id` — Cambiar estado
-- `PATCH /api/patient-programs/:id/next-control` — Cambiar fecha próximo control
-
-### Médicos (admin)
-- `GET /api/doctors` — Listar
-- `POST /api/doctors` — Crear
-- `PATCH /api/doctors/:id` — Editar
-- `POST /api/doctors/:id/programs` — Asignar a programa
-
-### Medicación
-- `GET /api/patients/:id/medications` — Listar recordatorios
-- `POST /api/patients/:id/medications` — Crear recordatorio
-- `PATCH /api/medication-reminders/:id` — Editar/pausar
-- `DELETE /api/medication-reminders/:id` — Eliminar
-
-### Notas
-- `GET /api/patients/:id/notes` — Listar notas paginadas
-- `POST /api/patients/:id/notes` — Crear nota operativa
-
-### Conversaciones
-- `GET /api/conversations` — Listar con filtros
-- `GET /api/conversations/:id/messages` — Mensajes paginados
-- `POST /api/conversations/:id/reply` — Responder desde panel
-
-### Dashboard
-- `GET /api/dashboard/stats` — Métricas generales
-- `GET /api/dashboard/alerts` — Alertas y pacientes en riesgo
-- `GET /api/dashboard/surveys` — Métricas de satisfacción
-
-### Base de conocimiento
-- `GET /api/knowledge` — Listar FAQs
-- `POST /api/knowledge` — Crear entrada
-- `PATCH /api/knowledge/:id` — Editar
-- `DELETE /api/knowledge/:id` — Eliminar
-
-### WhatsApp webhook
-- `GET /api/webhooks/whatsapp` — Verificación Meta
-- `POST /api/webhooks/whatsapp` — Recibir mensajes
-
-### Health
-- `GET /health` — Liveness check (público)
-- `GET /health/deep` — DB connectivity (protegido)
-- `GET /health/cron` — Estado del cron (protegido)
+doctors, doctor_programs, patients, programs, patient_programs, reminders, conversations, messages, patient_notes (cifrada), knowledge_base, surveys, medication_reminders (+ endDate/instructions/sideEffects), patient_self_reminders, **audit_logs**.
+> `messages.content` y `patient_notes.content` cifrados en reposo.
 
 ---
 
 ## Seguridad
 
-### Medidas implementadas
-- JWT httpOnly cookies (access 15min + refresh 7d)
-- bcrypt para contraseñas
-- CORS restringido al dominio del panel
-- Helmet headers de seguridad
-- Zod validation en TODOS los endpoints
-- HMAC-SHA256 verificación de webhooks WhatsApp
-- Sanitización CSV injection en todas las vías de entrada
-- Defensa contra prompt injection (strip `<>`, notas confidenciales con doble barrera)
-- Deduplicación de webhooks Meta (Set in-memory, 5000 IDs)
-- Rate limiting en webhook (1000 req/min por IP)
-- Verificación timing-safe de tokens
-
-### Sin datos clínicos (por diseño)
-- Solo: nombre, DNI, teléfono, programa, fechas de control
-- NUNCA: diagnósticos, resultados, tratamientos, historia clínica
-- Notas operativas limitadas a 500 chars con disclaimer obligatorio
-- El bot incluye notas en contexto pero NUNCA las revela al paciente
-
-### Auditorías completadas
-- 8 code reviews con agentes especializados
-- 3 security audits completos
-- 2 análisis profundos de bugs (frontend + backend, 23 bugs resueltos)
-- 1 regression review completo (20 features verificadas)
-- react-doctor: 97/100 (0 errores)
+- JWT httpOnly (access 15min + refresh 7d) con revocación; bcrypt; CORS restringido; Helmet; Zod en todos los endpoints.
+- HMAC verificación de webhooks; dedup de webhooks; rate limiting; verificación timing-safe.
+- Defensa anti prompt-injection (strip `<>`, notas con doble barrera).
+- Cifrado en reposo de PII clínica + audit log (ver sección Compliance).
+- Sin datos clínicos detallados: solo nombre, DNI, teléfono, programa, fechas, medicación.
 
 ---
 
 ## Testing
 
-- **267 tests unitarios**, 11 archivos, todo verde
-- Cobertura: auth, middleware, phone normalization, CSV sanitization, escalation detection, survey parsing, medication slots, KB keywords, self-reminder parsing, self-reminder validation
+- **422 tests** unitarios (20 archivos), todo verde. Incluye filtro de PII de Sentry y duración/auto-apagado de medicación.
+- CI en GitHub Actions: build db + api + web + tests en cada PR a `main`.
 
 ---
 
-## 9 Programas oficiales del IPS
+## Roadmap clínico (pedido por un médico, 2026-05-21)
 
-| Programa | Frecuencia de control |
-|----------|----------------------|
-| Diabetes | Cada 3 meses |
-| Mujer Sana | Cada 12 meses |
-| Hombre Sano | Cada 12 meses |
-| PREDHICAR (Hipertensión) | Cada 1 mes |
-| Osteoporosis | Cada 12 meses |
-| Oncológico | 3/6/12 meses (configurable) |
-| Celíacos | Cada 12 meses |
-| Cáncer de Colon | Cada 12 meses |
-| Plan Materno Infantil | Según semana de gestación |
+Research hecho: el grueso se construye sobre el stack actual (no hacen falta frameworks). Estado:
+
+| # | Pedido | Estado |
+|---|--------|--------|
+| 1 | Medicación con duración + instrucciones | ✅ **Hecho** (este deploy) |
+| 4 | Recordatorios contextuales (ej. comer antes de insulina) | ✅ Cubierto por el campo "instrucciones" |
+| 2 | Turnos con recordatorios escalonados (1 sem / 2 días) | ⬜ Próximo bloque (tabla + node-cron) |
+| 7 | Bot de turnos por WhatsApp | ⬜ Próximo bloque (Claude tool use) |
+| 8 | Pantalla de carga del médico (indicaciones/turnos) | 🔶 Parcial (medicación lista; turnos pendiente) |
+| 3 | Efectos secundarios | 🔴 Campo listo; **bloqueado**: no hay fuente abierta argentina válida → los carga/valida el médico, el bot los reenvía |
+| 9 | Receta electrónica | 🔴 **Bloqueado (legal)**: Ley 27.553 — solo válida vía plataforma registrada en ReNaPDiS (ej. Integrando Salud/FHIR). Decisión institucional antes de integrar |
+
+---
+
+## Pendientes
+
+1. 🔑 **Rotar contraseña de la DB (Neon)** — la connection string quedó expuesta el 2026-05-21. Rotar + actualizar `DATABASE_URL` en Render (en bajo tráfico, para no cortar el bot).
+2. ✏️ **Editar medicación** ya cargada en el panel (hoy: crear/pausar/borrar; editar = borrar y recrear).
+3. 📊 **Sentry en el panel** (`@sentry/nextjs`) — hoy solo está en la API.
+4. 🧹 *Drift* preexistente de `patient_self_reminders` en el schema (no afecta funcionamiento).
+5. **Meta**: verificación de negocio + templates aprobados (operación actual por Twilio).
+6. **Render Starter** ($7/mes) si el free tier sigue durmiendo el container.
 
 ---
 
 ## Infra y deploy
 
 ```
-┌───────────────────────────────────────────────┐
-│              Render (1 servicio)               │
-│                                               │
-│  Express.js (Node + TypeScript)               │
-│  ├── API REST (panel)                         │
-│  ├── Webhook WhatsApp (Meta Cloud API)        │
-│  ├── AI (Claude Sonnet 4.6 + Haiku fallback)  │
-│  ├── Cron controles (8:00 AM Argentina)       │
-│  ├── Cron medicación (cada 30 min)            │
-│  ├── Cron encuestas (10:00 AM Argentina)      │
-│  └── Cron self-reminders (cada 30 min)        │
-│                                               │
-│  PostgreSQL (Neon serverless)                 │
-│  Prisma ORM                                  │
-└───────────────────────────────────────────────┘
+Render (1 servicio)
+  Express (Node + TS)
+  ├── API REST (panel)        ├── Webhook WhatsApp (Twilio)
+  ├── AI (Sonnet 4.6 + Haiku) ├── Sentry (errores, sin PII)
+  ├── 5 crons                 └── migrate deploy automático al arrancar
+  PostgreSQL (Neon) + Prisma (+ cifrado de campos)
 
-┌───────────────────────────────────────────────┐
-│              Vercel                           │
-│  Next.js 14 (App Router, standalone)          │
-│  Panel web de médicos                         │
-│  Proxy API via rewrites                       │
-└───────────────────────────────────────────────┘
+Vercel
+  Next.js 14 — Panel de médicos (deploy en push a main + previews por PR)
 ```
-
----
-
-## Lecciones aprendidas
-
-55 lecciones documentadas en LESSONS.md. Temas principales:
-- Manejo de timezones (Argentina UTC-3)
-- Normalización de teléfonos argentinos para Meta API
-- Deduplicación de webhooks
-- CSV injection prevention
-- Prompt engineering para bots de salud
-- Prisma en Docker Alpine (openssl, bcrypt)
-- Deploy en PaaS (Render/Vercel)
-- Seguridad en sistemas de salud
-
----
-
-## Pendientes
-
-1. **Verificación de negocio en Meta** — Para enviar a cualquier número sin lista blanca
-2. **Templates de mensaje aprobados** — Para recordatorios proactivos fuera de ventana 24h
-3. **Render Starter ($7/mes)** — Si el free tier sigue matando el container
 
 ---
 
@@ -340,14 +175,8 @@ Sistema para el IPS (Instituto de Previsión Social de Misiones) con dos partes:
 
 | Fecha | Qué se hizo |
 |-------|-------------|
-| 2026-03-30 | Pasos 0-10: Spec, monorepo, DB, API, bot, crons, panel, deploy producción |
-| 2026-03-31 | Pasos 11-15: Notas, control editable, alertas, exportar CSV, editar paciente |
-| 2026-03-31 | Pasos 16-18: KB (30 FAQs reales), derivación humano, encuestas post-control |
-| 2026-03-31 | Extras: Recordatorios medicación, bot Sonnet 4.6 + "Ana", KB ipsmisiones.com.ar |
-| 2026-03-31 | Bug fixes: Deduplicación webhooks, retry+fallback, phone normalization, guards |
-| 2026-03-31 | Reviews: 5 code reviews, 2 security audits, 2 deep bug hunts, 140 tests |
-| 2026-03-31 | Infra: UptimeRobot, escalabilidad 500 pacientes, PDF presentación |
-| 2026-04-10 | Paso 19: Recordatorios autogestivos — flujo determinístico bot, cron, 267 tests |
-| 2026-04-10 | 4 agents review (code/security/perf/arch): 7 findings, todos arreglados |
-| 2026-04-10 | Regression review completo: 20 features verificadas, 0 regresiones |
-| 2026-04-10 | Fix: recordatorios del bot van a misma tabla medicación, UI unificada |
+| 2026-03-30/31 | Pasos 0-18: spec, monorepo, DB, API, bot, crons, panel, deploy, notas, alertas, CSV, KB, derivación, encuestas. Reviews + 140 tests |
+| 2026-04-10 | Paso 19: recordatorios autogestivos. 267 tests. Reviews multi-agente |
+| 2026-05-19 | Compliance ley 25.326: audit log, consentimiento, soft-delete, cifrado en reposo de PII + hardening. Followup "sin programa" + alertas |
+| 2026-05-20 | Observabilidad con Sentry en la API (sin PII) + test del filtro de PII + flush en shutdown |
+| 2026-05-21 | Deploy a producción del compliance + Sentry + alertas (PR #1). Cifrado activado en prod + backfill de 550 registros. Bloque medicación: duración + instrucciones + efectos secundarios, con TDD + code-review (PR #2). 422 tests |

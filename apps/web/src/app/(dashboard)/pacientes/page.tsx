@@ -47,6 +47,7 @@ export default function PacientesPage() {
   const [data, setData] = useState<PatientsResponse | null>(null);
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [debouncedSearch, setDebouncedSearch] = useState(search);
   const [programId, setProgramId] = useState(searchParams.get('programId') || '');
@@ -78,8 +79,9 @@ export default function PacientesPage() {
     try {
       const result = await apiGet<PatientsResponse>(`/api/patients?${params}`);
       setData(result);
+      setFetchError(false);
     } catch {
-      // Error handled silently
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
@@ -299,6 +301,19 @@ export default function PacientesPage() {
           </select>
         </form>
       </div>
+
+      {/* Error banner */}
+      {fetchError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-center justify-between">
+          <p className="text-sm text-red-700">Error al cargar pacientes. Verificá tu conexión.</p>
+          <button
+            onClick={fetchPatients}
+            className="text-xs text-red-700 underline hover:text-red-900 cursor-pointer"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <div className="bg-white rounded-lg border border-border overflow-hidden">

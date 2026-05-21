@@ -30,6 +30,28 @@ const webhookLimiter = rateLimit({
 const MAX_MESSAGE_LENGTH = 2000;
 
 /**
+ * Clasifica un POST del webhook de Twilio. Pura y exportada para testear.
+ * - 'status'      → callback de estado (delivered/read/failed). NUNCA es un
+ *                   mensaje entrante, aunque traiga NumMedia (callback de un
+ *                   mensaje saliente con media). No se responde.
+ * - 'ignore'      → sin MessageSid o sin From: no es un mensaje de usuario.
+ * - 'text'        → mensaje entrante con texto.
+ * - 'unsupported' → mensaje entrante SIN texto = audio/imagen/video/documento/
+ *                   sticker/ubicación/vCard. Por descarte (no enumerando tipos),
+ *                   para no quedar mudos ante un tipo nuevo.
+ */
+export type TwilioWebhookKind = 'status' | 'ignore' | 'text' | 'unsupported';
+
+export function classifyTwilioWebhook(
+  params: Record<string, string | undefined>
+): TwilioWebhookKind {
+  if (params.MessageStatus || params.SmsStatus) return 'status';
+  if (!params.MessageSid || !params.From) return 'ignore';
+  if ((params.Body ?? '').trim()) return 'text';
+  return 'unsupported';
+}
+
+/**
  * Twilio inbound WhatsApp webhook.
  * Receives form-urlencoded POST. Body fields: From, To, Body, MessageSid, ProfileName, WaId.
  * Spec: https://www.twilio.com/docs/messaging/guides/webhook-request
@@ -54,11 +76,15 @@ twilioRouter.post('/webhooks/twilio', webhookLimiter, (req, res) => {
   const body = (params.Body ?? '').slice(0, MAX_MESSAGE_LENGTH);
   const profileName = (params.ProfileName ?? '').slice(0, 100).replace(/[<>"']/g, '');
 
+  // Clasificar: status callback / ignorar / texto / contenido no soportado.
+  const kind = classifyTwilioWebhook(params);
+  const isUnsupported = kind === 'unsupported';
+
   // Dedup BEFORE responding (perf review CRITICAL): Twilio retries fast on 5xx.
   // If the check ran inside the async IIFE, two webhooks racing in <50ms both
-  // passed and the message got processed twice.
+  // passed and the message got processed twice. Solo dedupeamos mensajes reales.
   const isDuplicate = !!messageSid && processedSids.has(messageSid);
-  if (messageSid && !isDuplicate) processedSids.add(messageSid);
+  if (messageSid && !isDuplicate && kind !== 'status') processedSids.add(messageSid);
 
   // TwiML empty response — we reply asynchronously via the REST API.
   res.status(200).type('text/xml').send('<Response/>');
@@ -68,7 +94,11 @@ twilioRouter.post('/webhooks/twilio', webhookLimiter, (req, res) => {
     return;
   }
 
-  if (!messageSid || !from || !body) {
+  // Solo procesamos mensajes ENTRANTES de usuario (texto o contenido no soportado).
+  // Los status callbacks (delivery/read) — incluso de un mensaje saliente CON
+  // media — y los eventos sin SID/remitente se ignoran. Antes un callback con
+  // NumMedia disparaba por error la guía "solo texto" (review).
+  if (kind === 'status' || kind === 'ignore') {
     return;
   }
 
@@ -77,7 +107,7 @@ twilioRouter.post('/webhooks/twilio', webhookLimiter, (req, res) => {
 
   (async () => {
     try {
-      await handleIncomingMessage(phone, body, profileName);
+      await handleIncomingMessage(phone, body, profileName, isUnsupported);
     } catch (error) {
       // Mask phone — production logs in Render are accessible to whoever has the dashboard.
       console.error(`[Twilio] Error procesando mensaje de ${maskPhone(phone)}:`, error);

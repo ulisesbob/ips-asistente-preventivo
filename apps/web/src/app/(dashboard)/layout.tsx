@@ -43,19 +43,25 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const router = useRouter();
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <Activity className="w-6 h-6 animate-pulse text-primary" />
-      </div>
-    );
-  }
-
   useEffect(() => {
     if (!isLoading && !doctor) {
       router.replace('/login');
     }
   }, [isLoading, doctor, router]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-slate-50">
+        <Activity className="w-6 h-6 animate-pulse text-primary" />
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground">Conectando…</p>
+          <p className="text-xs text-muted-foreground/70 mt-0.5">
+            Esto puede tardar unos segundos la primera vez.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (!doctor) {
     return (

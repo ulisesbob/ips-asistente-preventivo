@@ -10,12 +10,13 @@ import {
   ChevronRight,
   MessageSquare,
   Filter,
+  PhoneForwarded,
 } from 'lucide-react';
 
 interface Conversation {
   id: string;
   phone: string;
-  status: 'OPEN' | 'CLOSED';
+  status: 'OPEN' | 'ESCALATED' | 'CLOSED';
   startedAt: string;
   closedAt: string | null;
   patient: { id: string; fullName: string; dni: string } | null;
@@ -90,6 +91,10 @@ export default function ConversacionesPage() {
     setPage(1);
   }
 
+  const escalatedCount = data
+    ? data.conversations.filter((c) => c.status === 'ESCALATED').length
+    : 0;
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -98,9 +103,22 @@ export default function ConversacionesPage() {
           <MessageSquare className="w-5 h-5" />
           Conversaciones
         </h1>
-        <span className="text-sm text-muted-foreground">
-          {data ? `${data.pagination.total} conversaciones` : ''}
-        </span>
+        <div className="flex items-center gap-3">
+          {escalatedCount > 0 && status !== 'ESCALATED' && (
+            <button
+              type="button"
+              onClick={() => { setStatus('ESCALATED'); setPage(1); }}
+              className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 cursor-pointer"
+              title="Ver solo escaladas"
+            >
+              <PhoneForwarded className="w-3 h-3" />
+              {escalatedCount} escalada{escalatedCount === 1 ? '' : 's'} en esta página
+            </button>
+          )}
+          <span className="text-sm text-muted-foreground">
+            {data ? `${data.pagination.total} conversaciones` : ''}
+          </span>
+        </div>
       </div>
 
       {/* Filters */}
@@ -128,6 +146,7 @@ export default function ConversacionesPage() {
             >
               <option value="">Todas</option>
               <option value="OPEN">Abiertas</option>
+              <option value="ESCALATED">Escaladas</option>
               <option value="CLOSED">Cerradas</option>
             </select>
           </div>
@@ -202,6 +221,10 @@ export default function ConversacionesPage() {
                       {conv.status === 'OPEN' ? (
                         <span className="inline-flex text-xs px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">
                           Abierta
+                        </span>
+                      ) : conv.status === 'ESCALATED' ? (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border bg-orange-50 text-orange-700 border-orange-200">
+                          <PhoneForwarded className="w-3 h-3" /> Escalada
                         </span>
                       ) : (
                         <span className="inline-flex text-xs px-2 py-0.5 rounded border bg-slate-50 text-slate-600 border-slate-200">
