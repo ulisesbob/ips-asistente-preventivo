@@ -24,6 +24,7 @@ interface ConversationDetail {
   id: string;
   phone: string;
   status: 'OPEN' | 'ESCALATED' | 'CLOSED';
+  botPausedUntil: string | null;
   startedAt: string;
   patientName: string | null;
 }
@@ -114,6 +115,16 @@ export default function ConversacionDetallePage() {
       setPage(nextPage);
     } catch {
       // Page not incremented — user can retry
+    }
+  }
+
+  async function handleResume() {
+    if (!confirm('¿Devolver la conversación al bot? Ana vuelve a responder automáticamente.')) return;
+    try {
+      await apiPost(`/api/conversations/${id}/resume`, {});
+      await fetchMessages(1, false); // refresca botPausedUntil → desaparece el banner
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al devolver al bot');
     }
   }
 
@@ -316,37 +327,66 @@ export default function ConversacionDetallePage() {
           )}
         </div>
       </div>
-      {/* Reply form for ESCALATED conversations */}
-      {conversation.status === 'ESCALATED' && (
-        <div className="bg-white rounded-lg border border-border p-4">
-          <div className="flex gap-2">
-            <textarea
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              placeholder="Escribí tu respuesta al paciente..."
-              rows={2}
-              maxLength={4096}
-              className="flex-1 px-3 py-2 rounded-md border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                  handleReply();
-                }
-              }}
-            />
-            <button
-              onClick={handleReply}
-              disabled={replying || !replyText.trim()}
-              className="self-end px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
-              title="Enviar (Ctrl+Enter)"
-            >
-              <Send className="w-4 h-4" />
-            </button>
+      {/* Caja de respuesta del operador: OPEN (modo híbrido) y ESCALATED. */}
+      {(conversation.status === 'OPEN' || conversation.status === 'ESCALATED') && (() => {
+        const botPaused =
+          conversation.status === 'OPEN' &&
+          !!conversation.botPausedUntil &&
+          new Date(conversation.botPausedUntil) > new Date();
+        return (
+          <div className="bg-white rounded-lg border border-border p-4">
+            {botPaused && (
+              <div className="mb-3 flex items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2">
+                <span className="text-xs text-amber-800">
+                  Bot en pausa — atendés vos (hasta{' '}
+                  {new Date(conversation.botPausedUntil!).toLocaleTimeString('es-AR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                  ).
+                </span>
+                <button
+                  onClick={handleResume}
+                  className="shrink-0 text-xs px-2.5 py-1 rounded-md border border-amber-400 text-amber-800 hover:bg-amber-100 cursor-pointer"
+                >
+                  Devolver al bot
+                </button>
+              </div>
+            )}
+            {conversation.status === 'OPEN' && !botPaused && (
+              <p className="mb-2 text-xs text-muted-foreground">
+                El bot está respondiendo. Si escribís, queda en pausa 30 min y atendés vos.
+              </p>
+            )}
+            <div className="flex gap-2">
+              <textarea
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Escribí tu respuesta al paciente..."
+                rows={2}
+                maxLength={4096}
+                className="flex-1 px-3 py-2 rounded-md border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    handleReply();
+                  }
+                }}
+              />
+              <button
+                onClick={handleReply}
+                disabled={replying || !replyText.trim()}
+                className="self-end px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+                title="Enviar (Ctrl+Enter)"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              El mensaje se envía por WhatsApp al paciente.
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            El mensaje se envía por WhatsApp al paciente.
-          </p>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
