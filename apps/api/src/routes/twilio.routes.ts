@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
+import { setAuditActor } from '@ips/db';
 import { verifyTwilioSignature } from '../services/twilio.service';
 import { handleIncomingMessage } from '../services/conversation.service';
 import { maskPhone } from '../utils/pii';
@@ -114,6 +115,10 @@ twilioRouter.post('/webhooks/twilio', webhookLimiter, (req, res) => {
 
   (async () => {
     try {
+      // Atribuimos las escrituras de este mensaje al BOT (no SYSTEM): registro,
+      // recordatorios, autoinscripción a programa, etc. quedan trazados como
+      // originados por el webhook de WhatsApp en el audit log (ley 25.326 art. 9).
+      setAuditActor({ actorType: 'BOT', actorId: null });
       await handleIncomingMessage(phone, body, profileName, isUnsupported);
     } catch (error) {
       // Mask phone — production logs in Render are accessible to whoever has the dashboard.

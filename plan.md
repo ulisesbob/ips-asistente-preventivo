@@ -152,3 +152,13 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Panel: GET /api/patients/:id/self-reminders (solo lectura, respeta permisos)
 - [x] Tests: 18 tests de parsing tags, validación fechas, límites, cancelación
 - [x] Code review: 3 HIGH + 1 MEDIUM arreglados (regex, retry cap 48h, falsy index, CHECK constraints)
+
+### Paso 20 — Menú del bot + autoinscripción a programas por chat ✅
+- [x] Menú inicial de 3 opciones para números nuevos (1 consulta · 2 inscripción · 3 turno-placeholder); conocidos van directo a chat y pueden escribir "menú"
+- [x] Opción 1: consulta. Conocido → handleChat con sus datos; desconocido → chat anónimo con la KB del IPS (sin registrarse), aislado (patientId=null) y con rate-limit por número
+- [x] Opción 2: lista de programas → autoinscripción por chat (PatientProgram con enrolledVia=BOT, sin médico, reviewedAt=null, ACTIVE); desconocido se registra primero (intent enhebrado); soporta inscribirse en 2+ programas
+- [x] Migración: PatientProgram.enrolledByDoctorId nullable + enum EnrolledVia + enrolledVia + reviewedAt + índice de cola de revisión
+- [x] Panel: badge "Autoinscripción por bot · revisar" en la ficha del paciente
+- [x] Escrituras del bot atribuidas a actorType=BOT en el audit log
+- [x] Tests: 16 del menú (fase 1) + 8 de autoinscripción (fase 2)
+- [x] Review: code-reviewer + security-auditor en ambas fases; fixes aplicados (aislamiento chat anónimo, rate-limit, boundedSet anti-OOM, NFD escalación, patientName vacío, guard programIds, audit BOT)
