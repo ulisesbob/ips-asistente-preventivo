@@ -1,6 +1,7 @@
 import { prisma, Role, RegisteredVia, ConsentVia, Gender, PatientProgramStatus, SelfReminderStatus, Prisma } from '@ips/db';
 import { parse as parseCsv } from 'csv-parse/sync';
-import { NotFoundError, ValidationError } from '../utils/errors';
+import { NotFoundError, ValidationError, ConflictError } from '../utils/errors';
+import { canonicalPhone, canonicalDni } from '../utils/phone';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -263,16 +264,21 @@ export async function upsertPatientByDni(
   input: PatientCreateInput,
   registeredVia: RegisteredVia = RegisteredVia.PANEL
 ): Promise<{ patient: Awaited<ReturnType<typeof prisma.patient.findUnique>>; created: boolean }> {
+  // Forma canónica antes de buscar/guardar: el dedup por DNI y el @unique de phone
+  // sólo funcionan si todas las vías normalizan igual (anti-duplicados).
+  const dni = canonicalDni(input.dni);
+  const phone = input.phone ? canonicalPhone(input.phone) : null;
+
   const existing = await prisma.patient.findUnique({
-    where: { dni: input.dni },
+    where: { dni },
   });
 
   if (existing) {
     // Update only fields that are currently null/missing
     const updated = await prisma.patient.update({
-      where: { dni: input.dni },
+      where: { dni },
       data: {
-        ...(input.phone && !existing.phone ? { phone: input.phone } : {}),
+        ...(phone && !existing.phone ? { phone } : {}),
         ...(input.birthDate && !existing.birthDate
           ? { birthDate: parseDateOrUndefined(input.birthDate) }
           : {}),
@@ -282,7 +288,7 @@ export async function upsertPatientByDni(
         // los reactive.
         ...(existing.deletedAt ? { deletedAt: null } : {}),
       },
-    });
+    }).catch(rethrowPhoneConflict);
     return { patient: updated, created: false };
   }
 
@@ -290,8 +296,8 @@ export async function upsertPatientByDni(
   const created = await prisma.patient.create({
     data: {
       fullName: input.fullName,
-      dni: input.dni,
-      phone: input.phone ?? null,
+      dni,
+      phone,
       birthDate: parseDateOrUndefined(input.birthDate) ?? null,
       gender: input.gender ?? null,
       consent: consentGiven,
@@ -300,9 +306,24 @@ export async function upsertPatientByDni(
       consentVia: consentGiven ? consentViaFromRegisteredVia(registeredVia) : null,
       registeredVia,
     },
-  });
+  }).catch(rethrowPhoneConflict);
 
   return { patient: created, created: true };
+}
+
+/**
+ * Traduce la violación del @unique de `phone` (P2002) a un 409 claro en vez de un
+ * 500 opaco. El teléfono NO se puede duplicar: si ya está en otro paciente, avisamos.
+ */
+function rethrowPhoneConflict(err: unknown): never {
+  if (
+    err instanceof Prisma.PrismaClientKnownRequestError &&
+    err.code === 'P2002' &&
+    (err.meta?.target as string[] | undefined)?.includes('phone')
+  ) {
+    throw new ConflictError('Ese teléfono ya está asignado a otro paciente');
+  }
+  throw err;
 }
 
 // ─── UPDATE ──────────────────────────────────────────────────────────────────
@@ -344,7 +365,10 @@ export async function updatePatient(
     where: { id: patientId },
     data: {
       ...(input.fullName !== undefined ? { fullName: input.fullName } : {}),
-      ...(input.phone !== undefined ? { phone: input.phone === '' || input.phone === null ? null : input.phone } : {}),
+      // Teléfono canónico al guardar (anti-duplicados): '' / null lo limpian.
+      ...(input.phone !== undefined
+        ? { phone: input.phone === '' || input.phone === null ? null : canonicalPhone(input.phone) }
+        : {}),
       ...(input.birthDate !== undefined
         ? { birthDate: parseDateOrUndefined(input.birthDate) ?? null }
         : {}),
@@ -354,7 +378,7 @@ export async function updatePatient(
         ? { consent: input.consent, consentAt: new Date(), consentVia: ConsentVia.PANEL }
         : {}),
     },
-  });
+  }).catch(rethrowPhoneConflict);
 
   return updated;
 }
@@ -465,10 +489,25 @@ export async function importPatientsFromCsv(csvContent: string): Promise<ImportR
     const errors: string[] = [];
 
     const fullName = (cols[0] ?? '').trim();
-    const dni = (cols[1] ?? '').trim();
-    const phone = (cols[2] ?? '').trim() || undefined;
+    const dniRaw = (cols[1] ?? '').trim();
+    const phoneRaw = (cols[2] ?? '').trim() || undefined;
     const birthDate = (cols[3] ?? '').trim() || undefined;
     const genderRaw = (cols[4] ?? '').trim() || undefined;
+
+    // Anti-inyección de fórmulas: SIEMPRE sobre el valor CRUDO, antes de cualquier
+    // normalización (LESSONS #53 — si canonicalizamos primero, "=+549..." perdería
+    // el "=" y se colaría como teléfono válido).
+    if (csvInjectionRegex.test(dniRaw)) {
+      errors.push('DNI con caracteres no permitidos');
+    }
+    if (phoneRaw && csvInjectionRegex.test(phoneRaw)) {
+      errors.push('Teléfono con caracteres no permitidos');
+    }
+
+    // Forma canónica para dedup + almacenamiento (anti-duplicados): mismo DNI/número
+    // en cualquier formato → mismo string → lo agarra el @unique.
+    const dni = canonicalDni(dniRaw);
+    const phone = phoneRaw ? canonicalPhone(phoneRaw) : undefined;
 
     if (!fullName || fullName.length < 2) {
       errors.push('fullName es requerido (mínimo 2 caracteres)');
@@ -477,13 +516,9 @@ export async function importPatientsFromCsv(csvContent: string): Promise<ImportR
     }
     if (!DNI_REGEX.test(dni)) {
       errors.push('DNI inválido (debe tener 6, 7 u 8 dígitos y no comenzar con 0)');
-    } else if (csvInjectionRegex.test(dni)) {
-      errors.push('DNI con caracteres no permitidos');
     }
     if (phone && !PHONE_E164_REGEX.test(phone)) {
       errors.push('Teléfono inválido (debe estar en formato E.164, ej: +5491123456789)');
-    } else if (phone && csvInjectionRegex.test(phone)) {
-      errors.push('Teléfono con caracteres no permitidos');
     }
     if (birthDate && csvInjectionRegex.test(birthDate)) {
       errors.push('Fecha con caracteres no permitidos');

@@ -40,3 +40,26 @@ export function toE164WithPlus(phone: string): string {
   }
   return '+' + p;
 }
+
+// ─── Normalización canónica para ALMACENAMIENTO (anti-duplicados) ─────────────
+//
+// El @unique de la DB sólo dedupa strings IDÉNTICOS. Para que el MISMO documento
+// o número no se pueda guardar dos veces "bajo ninguna circunstancia" (bot, panel,
+// CSV), toda vía de escritura debe normalizar a una ÚNICA forma canónica antes de
+// buscar/guardar. Estas funciones son esa forma canónica.
+
+/** DNI canónico: solo dígitos (saca puntos, espacios, cualquier separador). */
+export function canonicalDni(raw: string): string {
+  return (raw ?? '').replace(/\D/g, '');
+}
+
+/**
+ * Teléfono canónico para guardar: E.164 con "+" y, para móviles AR, SIEMPRE con el
+ * "9" (`+549...`). Así un número cargado como `+543764...` (panel) y el mismo
+ * número que llega del bot como `+5493764...` colapsan al mismo string y el @unique
+ * impide el duplicado. Limpia separadores comunes (espacios, guiones, paréntesis).
+ */
+export function canonicalPhone(raw: string): string {
+  const cleaned = (raw ?? '').replace(/[^\d+]/g, '');
+  return toE164WithPlus(cleaned);
+}
