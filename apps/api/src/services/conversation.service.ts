@@ -45,6 +45,10 @@ const MAX_HISTORY_FOR_DB = 20; // Align with AI service MAX_HISTORY_MESSAGES
 // If an ESCALATED conversation has no operator activity in this window, auto-reopen
 // so the patient isn't stuck waiting forever (audit #16).
 const ESCALATION_STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
+// Modo híbrido: cuando un operador escribe desde el panel en una conversación OPEN,
+// el bot se calla por esta ventana (auto-expira para no quedar mudo si el operador
+// se olvida de devolver el control). Se puede acortar con resumeBot.
+const BOT_PAUSE_MS = 30 * 60 * 1000; // 30 minutes
 
 // Escalation keywords — patient wants to talk to a human (pre-normalized, no accents)
 const ESCALATION_KEYWORDS = [
@@ -313,6 +317,28 @@ export async function handleIncomingMessage(
     await autoLinkPatient(normalizedPhone, e164Phone, patient);
     if (!patient.consent) return; // opted out — linked silently, don't process further
     patient.whatsappLinked = true; // local mutation so the next branch runs
+  }
+
+  // 3.9. Modo híbrido: si un operador está atendiendo (bot en pausa) sobre una
+  // conversación OPEN, guardamos el mensaje del paciente y NO procesamos NADA
+  // (ni encuesta, ni IA) hasta que la pausa expire o el operador devuelva el bot.
+  // Va ANTES de la encuesta a propósito: un "sí/no" que el paciente le manda al
+  // operador NO debe ser interpretado por el parser de encuestas.
+  if (patient && patient.whatsappLinked) {
+    const pausedConv = await prisma.conversation.findFirst({
+      where: {
+        phone: e164Phone,
+        status: ConversationStatus.OPEN,
+        botPausedUntil: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+    if (pausedConv) {
+      await prisma.message.create({
+        data: { conversationId: pausedConv.id, role: MessageRole.USER, content: text },
+      });
+      return;
+    }
   }
 
   // 4. Pending survey response — chequear PRIMERO (antes de ESCALATED) para
@@ -1456,8 +1482,12 @@ export async function sendOperatorReply(
 ): Promise<void> {
   const conversation = await verifyConversationAccess(conversationId, doctorId, role);
 
-  if (conversation.status !== ConversationStatus.ESCALATED) {
-    throw new ValidationError('Solo se puede responder a conversaciones escaladas');
+  // Modo híbrido: el operador puede escribir en OPEN (bot activo) y en ESCALATED.
+  // Solo CLOSED se rechaza (conversación ya terminada). Decisión de producto: se
+  // permite responder aunque el paciente haya dado BAJA — es atención humana en
+  // una conversación en curso (el BOT sí queda mudo tras BAJA).
+  if (conversation.status === ConversationStatus.CLOSED) {
+    throw new ValidationError('No se puede responder a una conversación cerrada');
   }
 
   // Save message as SYSTEM (from operator) and send via WhatsApp
@@ -1469,8 +1499,34 @@ export async function sendOperatorReply(
     },
   });
 
+  // Si el bot estaba atendiendo (OPEN), lo pausamos para no pisar al humano. La
+  // pausa auto-expira (BOT_PAUSE_MS); cada respuesta del operador la renueva.
+  if (conversation.status === ConversationStatus.OPEN) {
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { botPausedUntil: new Date(Date.now() + BOT_PAUSE_MS) },
+    });
+  }
+
   // sendTextMessage already normalizes internally via normalizePhoneForSend
   await sendTextMessage(conversation.phone, replyText);
+}
+
+// ─── Resume bot (devolver la conversación al bot) ────────────────────────────
+// El operador termina su intervención y le devuelve el control al bot antes de que
+// expire la pausa. No avisa al paciente: el bot simplemente retoma en el próximo
+// mensaje (evita un mensaje de sistema innecesario al adulto mayor).
+
+export async function resumeBot(
+  conversationId: string,
+  doctorId: string,
+  role: Role
+): Promise<void> {
+  await verifyConversationAccess(conversationId, doctorId, role); // IDOR: acceso por programa
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { botPausedUntil: null },
+  });
 }
 
 // ─── Close escalated conversation ────────────────────────────────────────────
