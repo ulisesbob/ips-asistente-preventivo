@@ -68,6 +68,9 @@ Notas operativas, control editable, alertas semáforo, exportar CSV (anti-inject
 ### Menú + autoinscripción por chat (Paso 20)
 Menú inicial de 3 opciones para números nuevos (1 consulta · 2 inscribirme en un programa · 3 turno-placeholder). La opción 1 permite consultar **sin registrarse** (chat anónimo con la KB del IPS, aislado y con rate-limit por número). La opción 2 lista los programas y el paciente se **autoinscribe por chat**: se crea el `PatientProgram` con `enrolledVia=BOT` y `reviewedAt=null` (activa directo, marcada para revisión del equipo en el panel). Un paciente puede sumar más de un programa. Escrituras del bot atribuidas a `actorType=BOT` en el audit log.
 
+### Modo híbrido de atención (Paso 21)
+El operador/médico puede escribirle al paciente desde el panel también en conversaciones **OPEN** (antes solo en ESCALATED). Al escribir en OPEN, el bot queda **en pausa** (`Conversation.botPausedUntil`, 30 min auto-expirable) y NO responde nada (el check va al inicio de `handleIncomingMessage`, antes de unsupported/BAJA/ALTA/encuesta/IA, así nada se cuela sobre la persona). El operador devuelve el control con **"Devolver al bot"** (`POST /conversations/:id/resume`). Acceso por programa (anti-IDOR) en reply y resume; pausa/resume auditadas. Decisión: el operador puede responder a un paciente con BAJA (atención humana en curso); los crons automáticos no se silencian (igual que con ESCALATED).
+
 ### Compliance y producción (mayo 2026)
 | Feature | Descripción |
 |---------|-------------|

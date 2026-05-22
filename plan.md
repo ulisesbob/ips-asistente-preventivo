@@ -162,3 +162,14 @@ Cada paso depende del anterior. No saltar pasos.
 - [x] Escrituras del bot atribuidas a actorType=BOT en el audit log
 - [x] Tests: 16 del menú (fase 1) + 8 de autoinscripción (fase 2)
 - [x] Review: code-reviewer + security-auditor en ambas fases; fixes aplicados (aislamiento chat anónimo, rate-limit, boundedSet anti-OOM, NFD escalación, patientName vacío, guard programIds, audit BOT)
+
+### Paso 21 — Modo híbrido de atención (operador escribe en OPEN) ✅
+- [x] Schema: Conversation.botPausedUntil (timestamptz) + índice parcial + migración 20260522000000
+- [x] sendOperatorReply: permitido en OPEN y ESCALATED (rechaza CLOSED); en OPEN pausa el bot 30 min
+- [x] handleIncomingMessage: check de pausa al INICIO (antes de unsupported/BAJA/ALTA/encuesta/IA) → guarda y corta
+- [x] resumeBot + POST /conversations/:id/resume (valida OPEN; acceso por programa)
+- [x] Limpia botPausedUntil al escalar y en el auto-reopen
+- [x] Panel: caja de respuesta en OPEN + banner "bot en pausa" + botón "Devolver al bot"
+- [x] Tests: 15 (OPEN pausa, ESCALATED, CLOSED, IDOR ±, pausa antes de encuesta, BAJA en pausa, no-texto, no-leak, concurrencia)
+- [x] Review: code-reviewer + security-auditor + test-architect; fixes aplicados (pausa al tope, limpiar al escalar, validar resume, tests faltantes)
+- [x] Verificación: tsc api+web limpio; vitest 591 passed, 7 skipped

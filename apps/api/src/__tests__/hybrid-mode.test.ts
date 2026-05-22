@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // - resumeBot limpia la pausa. Acceso por programa (IDOR) en ambas acciones.
 
 const mockPrisma = {
-  patient: { findUnique: vi.fn() },
+  patient: { findUnique: vi.fn(), update: vi.fn() },
   conversation: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
   doctorProgram: { findMany: vi.fn() },
   message: { create: vi.fn(), createMany: vi.fn(), findMany: vi.fn() },
@@ -63,6 +63,7 @@ beforeEach(() => {
   mockSendTextMessage.mockResolvedValue(true);
   mockGenerateResponse.mockResolvedValue('Respuesta de Ana.');
   mockPrisma.patient.findUnique.mockResolvedValue(null);
+  mockPrisma.patient.update.mockResolvedValue({});
   mockPrisma.conversation.findFirst.mockResolvedValue(null);
   mockPrisma.conversation.findUnique.mockResolvedValue(null);
   mockPrisma.conversation.create.mockResolvedValue({ id: 'conv-1' });
@@ -173,5 +174,94 @@ describe('handleIncomingMessage: bot en pausa (operador atendiendo)', () => {
 
     expect(mockGenerateResponse).toHaveBeenCalledOnce();
     expect(mockSendTextMessage).toHaveBeenCalled();
+  });
+});
+
+// ─── La pausa va ANTES de la encuesta y de BAJA/ALTA (regresión clave) ────────
+
+describe('La pausa corta ANTES de cualquier handler automático', () => {
+  it('con pausa, un "sí" NO llega al parser de encuestas', async () => {
+    mockPrisma.patient.findUnique.mockResolvedValue(makePatient());
+    mockPrisma.conversation.findFirst.mockResolvedValue({ id: 'conv-paused' });
+    const survey = await import('../services/survey.service');
+    const { handleIncomingMessage } = await load();
+
+    await handleIncomingMessage(PHONE, 'sí', 'Carlos', false); // parece respuesta de encuesta
+
+    expect(survey.processSurveyResponse).not.toHaveBeenCalled();
+    expect(mockGenerateResponse).not.toHaveBeenCalled();
+    expect(mockPrisma.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ role: 'USER', content: 'sí' }) })
+    );
+  });
+
+  it('SIN pausa, un "sí" SÍ llega al parser de encuestas', async () => {
+    mockPrisma.patient.findUnique.mockResolvedValue(makePatient());
+    mockPrisma.conversation.findFirst.mockResolvedValue(null);
+    const survey = await import('../services/survey.service');
+    const { handleIncomingMessage } = await load();
+
+    await handleIncomingMessage(PHONE, 'sí', 'Carlos', false);
+
+    expect(survey.processSurveyResponse).toHaveBeenCalledWith('pat-1', 'sí');
+  });
+
+  it('con pausa, "BAJA" NO dispara el bot (no envía, no cambia consent) — solo se guarda', async () => {
+    mockPrisma.patient.findUnique.mockResolvedValue(makePatient());
+    mockPrisma.conversation.findFirst.mockResolvedValue({ id: 'conv-paused' });
+    const { handleIncomingMessage } = await load();
+
+    await handleIncomingMessage(PHONE, 'BAJA', 'Carlos', false);
+
+    expect(mockSendTextMessage).not.toHaveBeenCalled(); // el bot no contesta sobre el operador
+    expect(mockPrisma.patient.update).not.toHaveBeenCalled(); // no cambia el consentimiento
+    expect(mockPrisma.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ role: 'USER', content: 'BAJA' }) })
+    );
+  });
+
+  it('con pausa, un mensaje no-texto NO dispara la guía del bot', async () => {
+    mockPrisma.patient.findUnique.mockResolvedValue(makePatient());
+    mockPrisma.conversation.findFirst.mockResolvedValue({ id: 'conv-paused' });
+    const { handleIncomingMessage } = await load();
+
+    await handleIncomingMessage(PHONE, '', 'Carlos', true); // isUnsupported
+
+    expect(mockSendTextMessage).not.toHaveBeenCalled();
+    expect(mockPrisma.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ role: 'USER', content: '[mensaje no-texto]' }) })
+    );
+  });
+});
+
+// ─── Acceso positivo + invariantes de la ruta del operador ───────────────────
+
+describe('sendOperatorReply — acceso e invariantes', () => {
+  it('DOCTOR del programa correcto SÍ puede responder', async () => {
+    mockPrisma.conversation.findUnique.mockResolvedValue(makeConvAccess('OPEN')); // paciente en 'p1'
+    mockPrisma.doctorProgram.findMany.mockResolvedValue([{ programId: 'p1' }]); // doctor en 'p1'
+    const { sendOperatorReply } = await load();
+    await expect(sendOperatorReply('conv-1', 'hola', 'doc-1', 'DOCTOR')).resolves.toBeUndefined();
+    expect(mockSendTextMessage).toHaveBeenCalled();
+  });
+
+  it('el texto del operador se envía LITERAL (no pasa por el filtro anti-leak de notas)', async () => {
+    mockPrisma.conversation.findUnique.mockResolvedValue(makeConvAccess('OPEN'));
+    const { sendOperatorReply } = await load();
+    const literal = 'Te confirmo el cambio de horario que dejó anotado el médico.';
+    await sendOperatorReply('conv-1', literal, 'doc-1', 'ADMIN');
+    expect(mockSendTextMessage).toHaveBeenCalledWith(E164, literal); // intacto
+  });
+
+  it('dos operadores casi-simultáneos en OPEN: ambos guardan/pausan/envían sin romper', async () => {
+    mockPrisma.conversation.findUnique.mockResolvedValue(makeConvAccess('OPEN'));
+    const { sendOperatorReply } = await load();
+    await Promise.all([
+      sendOperatorReply('conv-1', 'op A', 'doc-1', 'ADMIN'),
+      sendOperatorReply('conv-1', 'op B', 'doc-2', 'ADMIN'),
+    ]);
+    expect(mockPrisma.message.create).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.conversation.update).toHaveBeenCalledTimes(2);
+    expect(mockSendTextMessage).toHaveBeenCalledTimes(2);
   });
 });

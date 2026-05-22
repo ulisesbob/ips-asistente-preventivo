@@ -270,6 +270,31 @@ export async function handleIncomingMessage(
   // impide duplicar el mismo número en formatos distintos (con/sin el 9).
   const e164Phone = canonicalPhone(normalizedPhone);
 
+  // ─── Modo híbrido: bot en pausa (operador atendiendo) ───────────────────────
+  // Va PRIMERO, antes de TODO (unsupported, BAJA/ALTA, encuesta, escalación, IA):
+  // si hay una conversación OPEN de este número con la pausa vigente, el bot no
+  // hace NADA — solo guarda el mensaje del paciente para que el operador lo lea.
+  // Así un "BAJA", un "sí" (encuesta) o un audio que el paciente le manda a la
+  // PERSONA no dispara ninguna respuesta automática. La pausa auto-expira.
+  const pausedConv = await prisma.conversation.findFirst({
+    where: {
+      phone: e164Phone,
+      status: ConversationStatus.OPEN,
+      botPausedUntil: { gt: new Date() },
+    },
+    select: { id: true },
+  });
+  if (pausedConv) {
+    await prisma.message.create({
+      data: {
+        conversationId: pausedConv.id,
+        role: MessageRole.USER,
+        content: isUnsupported ? '[mensaje no-texto]' : text,
+      },
+    });
+    return;
+  }
+
   // BUG 1: contenido NO-texto (audio/imagen/sticker/ubicación/documento). El
   // dedup ya ocurrió en el webhook (Twilio/Meta), así que respondemos UNA sola
   // vez con la guía y cortamos: no IA, no registro, no flujos.
@@ -319,28 +344,6 @@ export async function handleIncomingMessage(
     patient.whatsappLinked = true; // local mutation so the next branch runs
   }
 
-  // 3.9. Modo híbrido: si un operador está atendiendo (bot en pausa) sobre una
-  // conversación OPEN, guardamos el mensaje del paciente y NO procesamos NADA
-  // (ni encuesta, ni IA) hasta que la pausa expire o el operador devuelva el bot.
-  // Va ANTES de la encuesta a propósito: un "sí/no" que el paciente le manda al
-  // operador NO debe ser interpretado por el parser de encuestas.
-  if (patient && patient.whatsappLinked) {
-    const pausedConv = await prisma.conversation.findFirst({
-      where: {
-        phone: e164Phone,
-        status: ConversationStatus.OPEN,
-        botPausedUntil: { gt: new Date() },
-      },
-      select: { id: true },
-    });
-    if (pausedConv) {
-      await prisma.message.create({
-        data: { conversationId: pausedConv.id, role: MessageRole.USER, content: text },
-      });
-      return;
-    }
-  }
-
   // 4. Pending survey response — chequear PRIMERO (antes de ESCALATED) para
   // que las encuestas no queden colgadas si el paciente está en escalación
   // activa. Si responde "sí" o "5" a una encuesta pendiente, lo procesamos
@@ -384,7 +387,9 @@ export async function handleIncomingMessage(
       if (isStale) {
         await prisma.conversation.update({
           where: { id: activeConv.id },
-          data: { status: ConversationStatus.OPEN },
+          // Limpiamos cualquier pausa híbrida vieja al reabrir para que el bot
+          // retome de verdad (no quede mudo por un botPausedUntil residual).
+          data: { status: ConversationStatus.OPEN, botPausedUntil: null },
         });
         console.log(
           `[Escalation] Auto-reopened stale ESCALATED conv ${activeConv.id} (patient ${maskId(patient.id)})`
@@ -1391,7 +1396,9 @@ async function handleEscalation(
   // Mark conversation as ESCALATED
   await prisma.conversation.update({
     where: { id: conversation.id },
-    data: { status: ConversationStatus.ESCALATED },
+    // Al escalar, limpiamos la pausa híbrida: ESCALATED ya silencia al bot por
+    // status; dejar un botPausedUntil residual confundiría un futuro auto-reopen.
+    data: { status: ConversationStatus.ESCALATED, botPausedUntil: null },
   });
 
   const message =
@@ -1522,7 +1529,11 @@ export async function resumeBot(
   doctorId: string,
   role: Role
 ): Promise<void> {
-  await verifyConversationAccess(conversationId, doctorId, role); // IDOR: acceso por programa
+  const conversation = await verifyConversationAccess(conversationId, doctorId, role); // IDOR
+  // Solo tiene sentido en OPEN (ESCALATED ya silencia por status; CLOSED terminó).
+  if (conversation.status !== ConversationStatus.OPEN) {
+    throw new ValidationError('Solo se puede devolver el bot en conversaciones abiertas');
+  }
   await prisma.conversation.update({
     where: { id: conversationId },
     data: { botPausedUntil: null },
