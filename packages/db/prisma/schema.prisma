@@ -262,6 +262,10 @@ model Conversation {
   patientId String?            @db.Uuid
   phone     String
   status    ConversationStatus @default(OPEN)
+  // Modo híbrido: cuando un operador escribe desde el panel en una conversación
+  // OPEN, el bot se "calla" hasta este timestamp (auto-expira). null = bot activo.
+  // El operador puede devolver el control antes (resumeBot → null).
+  botPausedUntil DateTime?     @db.Timestamptz()
   startedAt DateTime           @default(now()) @db.Timestamptz()
   closedAt  DateTime?          @db.Timestamptz()
 
