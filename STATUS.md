@@ -5,7 +5,7 @@
 - **Último hito:** Bloque medicación (duración + instrucciones + efectos secundarios) deployado a producción
 - **Compliance ley 25.326:** ACTIVO — audit log, cifrado en reposo de PII clínica, consentimiento trazable, soft-delete
 - **Observabilidad:** Sentry activo en la API (sin PII)
-- **Bot:** Claude Sonnet 4.6 + fallback Haiku 4.5, personalidad "Ana", 30 FAQs reales IPS
+- **Bot:** Claude Sonnet 4.6 + fallback Haiku 4.5, personalidad "Ana", 30 FAQs reales IPS, menú inicial de 3 opciones + autoinscripción a programas por chat
 - **Bloqueadores:** Ninguno técnico. Pendiente de seguridad: rotar contraseña de la DB (ver Pendientes).
 - **Fecha:** 21 de mayo de 2026
 
@@ -65,6 +65,9 @@ Monorepo, DB Prisma, API REST + Auth JWT, CRUD pacientes (UPSERT por DNI), 9 pro
 ### Avanzadas (Pasos 11-19)
 Notas operativas, control editable, alertas semáforo, exportar CSV (anti-injection), editar paciente, base de conocimiento (30 FAQs reales), derivación a humano, encuestas post-control, recordatorios autogestivos del paciente.
 
+### Menú + autoinscripción por chat (Paso 20)
+Menú inicial de 3 opciones para números nuevos (1 consulta · 2 inscribirme en un programa · 3 turno-placeholder). La opción 1 permite consultar **sin registrarse** (chat anónimo con la KB del IPS, aislado y con rate-limit por número). La opción 2 lista los programas y el paciente se **autoinscribe por chat**: se crea el `PatientProgram` con `enrolledVia=BOT` y `reviewedAt=null` (activa directo, marcada para revisión del equipo en el panel). Un paciente puede sumar más de un programa. Escrituras del bot atribuidas a `actorType=BOT` en el audit log.
+
 ### Compliance y producción (mayo 2026)
 | Feature | Descripción |
 |---------|-------------|
@@ -83,12 +86,15 @@ Notas operativas, control editable, alertas semáforo, exportar CSV (anti-inject
 - Responde FAQs (coberturas, trámites, programas, urgencias), da fechas de control y centros.
 - Informa medicación activa (nombre, dosis, horario) y manda recordatorios diarios **con las instrucciones del médico**.
 - Seguimiento de pacientes sin programa (hasta 3 recordatorios espaciados).
-- Crea recordatorios autogestivos, explica inscripción presencial, escala a humano, envía encuestas, registra pacientes (nombre+DNI), procesa BAJA/ALTA.
+- Crea recordatorios autogestivos, escala a humano, envía encuestas, registra pacientes (nombre+DNI), procesa BAJA/ALTA.
+- Muestra un menú inicial a números nuevos (consulta / inscripción / turnos) y deja consultar sin registrarse.
+- Permite que el paciente se **autoinscriba a programas por chat** (a su pedido), marcando la inscripción para revisión del equipo.
 
 ### NO hace (por diseño)
 - NUNCA evalúa síntomas ni recomienda tratamientos.
 - NUNCA genera/recita efectos secundarios — solo reenvía lo que el médico cargó.
-- NUNCA revela notas internas ni inscribe en programas.
+- NUNCA revela notas internas.
+- NUNCA decide clínicamente una inscripción: la autoinscripción por chat es **a pedido del paciente** y queda marcada (`enrolledVia=BOT`, `reviewedAt=null`) para que un profesional la revise — la IA no la valida ni la genera por su cuenta.
 
 ---
 

@@ -1,4 +1,4 @@
-import { prisma, Role, PatientProgramStatus, Prisma } from '@ips/db';
+import { prisma, Role, PatientProgramStatus, EnrolledVia, Prisma } from '@ips/db';
 import { NotFoundError, ForbiddenError, ConflictError, ValidationError } from '../utils/errors';
 import { scheduleSurvey } from './survey.service';
 
@@ -235,6 +235,83 @@ export async function enrollPatient(
   } catch (err) {
     if (isUniqueConstraintError(err)) {
       throw new ConflictError('El paciente ya está inscripto en este programa');
+    }
+    throw err;
+  }
+}
+
+// ─── Autoinscripción del paciente por el bot (fase 2) ───────────────────────
+//
+// El paciente se inscribe solo desde WhatsApp. NO hay médico ni validación
+// clínica: la inscripción nace marcada (enrolledVia=BOT, reviewedAt=null) para que
+// el equipo la revise y confirme desde el panel. No reusa enrollPatient porque ese
+// exige enrolledByDoctorId + chequeo de doctor_programs (acá no aplica).
+
+/**
+ * Programas en los que el paciente AÚN NO tiene inscripción (de ningún estado).
+ * Se excluyen todos los que ya tiene porque el unique [patientId, programId] impide
+ * una segunda inscripción al mismo programa. Orden alfabético (estable para la lista).
+ */
+export async function listProgramsForSelfEnroll(patientId: string) {
+  const existing = await prisma.patientProgram.findMany({
+    where: { patientId },
+    select: { programId: true },
+  });
+  const enrolledIds = new Set(existing.map((e) => e.programId));
+
+  const programs = await prisma.program.findMany({
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true },
+  });
+  return programs.filter((p) => !enrolledIds.has(p.id));
+}
+
+export interface SelfEnrollResult {
+  programName: string;
+  alreadyEnrolled: boolean;
+}
+
+/**
+ * Crea la autoinscripción del bot. Decisión de producto (2026-05-21): nace ACTIVE
+ * y manda recordatorios desde ya (el primero recién en +frecuencia); enrolledVia=BOT
+ * + reviewedAt=null la dejan marcada en el panel para que el equipo la revise como
+ * control posterior (no es un gate). Si choca con el unique (carrera) devuelve
+ * alreadyEnrolled sin romper. El create se audita solo (PatientProgram ∈ AUDITED_MODELS).
+ */
+export async function selfEnrollViaBot(
+  patientId: string,
+  programId: string
+): Promise<SelfEnrollResult> {
+  const program = await prisma.program.findUnique({
+    where: { id: programId },
+    select: { id: true, name: true, reminderFrequencyDays: true },
+  });
+  if (!program) {
+    throw new NotFoundError('Programa no encontrado');
+  }
+
+  // nextReminderDate = hoy + frecuencia, en UTC (LESSONS #11 — sin drift de zona).
+  const now = new Date();
+  const nextReminderDate = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
+  nextReminderDate.setUTCDate(nextReminderDate.getUTCDate() + program.reminderFrequencyDays);
+
+  try {
+    await prisma.patientProgram.create({
+      data: {
+        patientId,
+        programId,
+        enrolledByDoctorId: null,
+        enrolledVia: EnrolledVia.BOT,
+        reviewedAt: null,
+        nextReminderDate,
+      },
+    });
+    return { programName: program.name, alreadyEnrolled: false };
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      return { programName: program.name, alreadyEnrolled: true };
     }
     throw err;
   }

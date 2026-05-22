@@ -36,6 +36,16 @@ const mockPrisma = {
     findMany: vi.fn(),
     count: vi.fn(),
   },
+  // Fase 2: la opción 2 (conocido) lista programas → conversation.service usa
+  // program.service, que toca estas tablas. Las mockeamos para que no rompa.
+  program: {
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+  },
+  patientProgram: {
+    findMany: vi.fn(),
+    create: vi.fn(),
+  },
 };
 
 const mockSendTextMessage = vi.fn();
@@ -106,6 +116,10 @@ beforeEach(() => {
   mockPrisma.message.createMany.mockResolvedValue({ count: 2 });
   mockPrisma.message.findMany.mockResolvedValue([]);
   mockPrisma.patientSelfReminder.findMany.mockResolvedValue([]);
+  mockPrisma.program.findMany.mockResolvedValue([{ id: 'prog-diab', name: 'Diabetes' }]);
+  mockPrisma.program.findUnique.mockResolvedValue({ id: 'prog-diab', name: 'Diabetes', reminderFrequencyDays: 90 });
+  mockPrisma.patientProgram.findMany.mockResolvedValue([]);
+  mockPrisma.patientProgram.create.mockResolvedValue({ id: 'pp-1' });
 });
 
 // ─── Número nuevo ve el menú ─────────────────────────────────────────────────
@@ -198,7 +212,7 @@ describe('Opción 2 (registrarme en un programa)', () => {
     expect(lastSent().toLowerCase()).toContain('nombre');
   });
 
-  it('conocido: 2 da los pasos de inscripción presencial', async () => {
+  it('conocido: 2 ofrece la lista de programas para autoinscribirse (fase 2)', async () => {
     const PHONE = '5493764000007';
     mockPrisma.patient.findUnique.mockResolvedValue(makeKnownPatient());
     const handle = await importHandler();
@@ -206,7 +220,9 @@ describe('Opción 2 (registrarme en un programa)', () => {
     await handle(PHONE, 'menú', 'Carlos', false);
     await handle(PHONE, '2', 'Carlos', false);
 
-    expect(lastSent()).toContain('Programas Especiales');
+    const sent = lastSent();
+    expect(sent).toContain('Diabetes'); // un programa de la lista
+    expect(sent.toLowerCase()).toContain('número');
   });
 });
 

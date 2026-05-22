@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
+import { setAuditActor } from '@ips/db';
 import { config } from '../config/env';
 import { asyncHandler } from '../middleware/error-handler';
 import {
@@ -123,6 +124,9 @@ whatsappRouter.post(
     // Process messages asynchronously — fire and forget (errors logged, not thrown)
     if (freshMessages.length > 0) {
       (async () => {
+        // Escrituras de estos mensajes se atribuyen al BOT en el audit log (no SYSTEM):
+        // registro, recordatorios, autoinscripción a programa (ley 25.326 art. 9).
+        setAuditActor({ actorType: 'BOT', actorId: null });
         for (const msg of freshMessages) {
           try {
             await handleIncomingMessage(msg.from, msg.text, msg.displayName, msg.isUnsupported);

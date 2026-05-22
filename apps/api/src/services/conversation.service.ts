@@ -27,6 +27,7 @@ import {
   formatRemindersForWhatsApp,
   todayArgentinaISO,
 } from './self-reminder.service';
+import { listProgramsForSelfEnroll, selfEnrollViaBot } from './program.service';
 import { maskId, maskPhone, firstName } from '../utils/pii';
 import { config } from '../config/env';
 import { NotFoundError, ValidationError } from '../utils/errors';
@@ -109,6 +110,9 @@ const MENU_KEYWORDS = ['menu', 'menú', 'opciones', 'inicio', 'volver'];
 interface ConversationState {
   step: 'AWAITING_NAME' | 'AWAITING_DNI';
   tempName?: string;
+  // 'PROGRAM': el registro arrancó desde la opción 2 (inscribirme en un programa).
+  // Al terminar el alta, ofrecemos la lista de programas en vez del welcome genérico.
+  intent?: 'PROGRAM';
   createdAt: number;
 }
 
@@ -604,32 +608,63 @@ async function handleGeneralChat(
   await sendTextMessage(toSendablePhone(normalizedPhone), aiResponse);
 }
 
-/** Opción 2 — inicia el flujo de inscripción en un programa. */
+/** Opción 2 — inicia el flujo de inscripción en un programa (fase 2). */
 async function startProgramFlow(
   normalizedPhone: string,
   e164Phone: string,
   patient: ChatPatient | null,
   text: string
 ): Promise<void> {
-  // Número no registrado → primero lo registramos (nombre + DNI). El welcome del
-  // registro explica los próximos pasos para inscribirse en un programa.
+  // Número no registrado → primero lo registramos (nombre + DNI) con intent PROGRAM:
+  // al terminar el alta, le ofrecemos la lista de programas (no el welcome genérico).
   if (!patient) {
     menuState.delete(normalizedPhone);
-    await handleRegistration(normalizedPhone, e164Phone, text);
+    await handleRegistration(normalizedPhone, e164Phone, text, 'PROGRAM');
     return;
   }
 
-  // Paciente conocido: por ahora le damos los pasos de inscripción. (La inscripción
-  // automática por chat — listar y anotar — se agrega en la fase siguiente.)
+  // Paciente conocido → ofrecemos la lista de programas para autoinscribirse.
+  await offerProgramList(normalizedPhone, e164Phone, patient.id, text);
+}
+
+/**
+ * Lista los programas en los que el paciente NO está inscripto, numerados, y deja
+ * el menú en AWAITING_PROGRAM (con los ids en orden). `prefix` permite anteponer el
+ * saludo de "recién registrado" cuando se llega desde el alta por la opción 2.
+ */
+async function offerProgramList(
+  normalizedPhone: string,
+  e164Phone: string,
+  patientId: string,
+  userText: string,
+  prefix = ''
+): Promise<void> {
+  const programs = await listProgramsForSelfEnroll(patientId);
+
+  if (programs.length === 0) {
+    const msg =
+      `${prefix}Ya figurás inscripto/a en todos nuestros programas 🙌. ` +
+      `Si necesitás otra cosa, escribí *menú*.`;
+    await sendTextMessage(toSendablePhone(normalizedPhone), msg);
+    await saveSystemMessage(e164Phone, patientId, userText, msg);
+    menuState.delete(normalizedPhone);
+    return;
+  }
+
+  const lines = programs.map((p, i) => `*${i + 1}* · ${p.name}`).join('\n');
   const msg =
-    `Para inscribirte en un programa de salud (diabetes, hipertensión, etc.) ` +
-    `un médico del IPS tiene que evaluarte:\n` +
-    `1️⃣ Acercate al Área de Programas Especiales (Junín 177, Posadas) o a tu delegación.\n` +
-    `2️⃣ Llevá DNI + carnet de afiliado.\n\n` +
-    `¿Necesitás algo más? Escribí *menú* para volver a las opciones.`;
-  await sendTextMessage(toSendablePhone(normalizedPhone), msg);
-  await saveSystemMessage(e164Phone, patient.id, text, msg);
-  menuState.delete(normalizedPhone);
+    `${prefix}Estos son los programas de salud del IPS. Respondé con el *número* del que ` +
+    `querés inscribirte:\n\n${lines}\n\n` +
+    `Si ya terminaste, escribí *menú*.`;
+
+  const sent = await sendTextMessage(toSendablePhone(normalizedPhone), msg);
+  if (!sent) return; // no avanzamos estado si el envío falló (reintenta)
+  await saveSystemMessage(e164Phone, patientId, userText, msg);
+  boundedSet(menuState, normalizedPhone, {
+    step: 'AWAITING_PROGRAM',
+    programIds: programs.map((p) => p.id),
+    createdAt: Date.now(),
+  });
 }
 
 /** Procesa la elección de programa (fase 2 — inscripción real por chat). */
@@ -638,12 +673,54 @@ async function handleProgramChoice(
   e164Phone: string,
   patient: ChatPatient | null,
   text: string,
-  _menu: MenuState
+  menu: MenuState
 ): Promise<void> {
-  const msg = 'En breve vas a poder elegir el programa por acá. Por ahora escribí *menú*.';
-  await sendTextMessage(toSendablePhone(normalizedPhone), msg);
-  await saveSystemMessage(e164Phone, patient?.id ?? null, text, msg);
-  menuState.delete(normalizedPhone);
+  // Sólo un paciente conocido puede inscribirse (el desconocido se registró antes
+  // de llegar acá). Si por algún borde no hay paciente, volvemos al menú.
+  if (!patient) {
+    menuState.delete(normalizedPhone);
+    await showMenu(normalizedPhone, e164Phone, null, text);
+    return;
+  }
+
+  const programIds = menu.programIds ?? [];
+
+  // Estado corrupto: AWAITING_PROGRAM sin lista. No dejamos al paciente atrapado.
+  if (programIds.length === 0) {
+    menuState.delete(normalizedPhone);
+    await showMenu(normalizedPhone, e164Phone, patient.id, text);
+    return;
+  }
+
+  const choice = parseInt(text.trim(), 10);
+
+  if (Number.isNaN(choice) || choice < 1 || choice > programIds.length) {
+    const retry =
+      `Respondé con un *número* de la lista (1 a ${programIds.length}), o escribí *menú* ` +
+      `para volver a las opciones.`;
+    await sendTextMessage(toSendablePhone(normalizedPhone), retry);
+    await saveSystemMessage(e164Phone, patient.id, text, retry);
+    // Seguimos esperando un número válido (refrescamos el TTL).
+    boundedSet(menuState, normalizedPhone, {
+      step: 'AWAITING_PROGRAM',
+      programIds,
+      createdAt: Date.now(),
+    });
+    return;
+  }
+
+  const programId = programIds[choice - 1];
+  const result = await selfEnrollViaBot(patient.id, programId);
+
+  // Tras inscribir (o detectar que ya estaba), re-ofrecemos los programas que le
+  // quedan: un paciente puede estar en 2+ programas y querer sumar otro. Si no
+  // queda ninguno, offerProgramList cierra con el mensaje de "ya está en todos".
+  const prefix = result.alreadyEnrolled
+    ? `Ya tenías una inscripción a *${result.programName}* 🙂.\n\n`
+    : `Listo! Te inscribí en *${result.programName}* 📝. El equipo del IPS lo va a revisar.\n` +
+      `Esta información es orientativa. Para consultas, comuníquese al ${config.IPS_SUPPORT_PHONE}.\n\n`;
+
+  await offerProgramList(normalizedPhone, e164Phone, patient.id, text, prefix);
 }
 
 /**
@@ -751,7 +828,8 @@ async function handleUnsupportedMessage(
 async function handleRegistration(
   phone: string,
   e164Phone: string,
-  text: string
+  text: string,
+  intent?: 'PROGRAM'
 ): Promise<void> {
   const state = getRegistrationState(phone);
 
@@ -770,7 +848,7 @@ async function handleRegistration(
       return; // patient will retry; next message will hit this branch again
     }
     await saveSystemMessage(e164Phone, null, text, greeting);
-    boundedSet(registrationState, phone, { step: 'AWAITING_NAME', createdAt: Date.now() });
+    boundedSet(registrationState, phone, { step: 'AWAITING_NAME', intent, createdAt: Date.now() });
     return;
   }
 
@@ -794,7 +872,12 @@ async function handleRegistration(
       console.warn(`[Registration] No se pudo enviar askDni a ${maskPhone(phone)} — no avanzo estado`);
       return;
     }
-    boundedSet(registrationState, phone, { step: 'AWAITING_DNI', tempName: name, createdAt: state.createdAt });
+    boundedSet(registrationState, phone, {
+      step: 'AWAITING_DNI',
+      tempName: name,
+      intent: state.intent, // preservamos el intent (ej. PROGRAM) entre pasos
+      createdAt: state.createdAt,
+    });
     await saveMessages(e164Phone, null, text, askDni);
     return;
   }
@@ -874,7 +957,10 @@ async function handleRegistration(
       });
 
       patientId = existing.id;
-      patientName = existing.fullName;
+      // Si el fullName guardado venía vacío/corto, recién lo rellenamos arriba con
+      // state.tempName — usamos el MISMO criterio acá para no saludar con "" (review C-1).
+      patientName =
+        !existing.fullName || existing.fullName.length < 2 ? state.tempName! : existing.fullName;
       programNames = existing.programs.map((pp) => pp.program.name);
     } else {
       // New patient — create
@@ -895,11 +981,27 @@ async function handleRegistration(
       patientName = state.tempName!;
     }
 
+    // Capturamos el intent ANTES de limpiar el estado.
+    const registrationIntent = state.intent;
+
     // Clean up registration state
     registrationState.delete(phone);
 
     // Update conversation with patient link
     await linkConversationToPatient(e164Phone, patientId);
+
+    // Si el alta arrancó desde la opción 2 (inscribirme en un programa), tras
+    // registrar ofrecemos la lista de programas en vez del welcome genérico (fase 2).
+    if (registrationIntent === 'PROGRAM') {
+      await offerProgramList(
+        phone,
+        e164Phone,
+        patientId,
+        text,
+        `Listo, ${patientName}! Ya quedaste registrado/a en el sistema del IPS. 📝\n\n`
+      );
+      return;
+    }
 
     // Build welcome message
     let welcome: string;
