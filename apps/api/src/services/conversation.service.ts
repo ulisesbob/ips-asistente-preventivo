@@ -68,7 +68,7 @@ const REMINDER_KEYWORDS = [
 // Note: "recordatorio" alone is NOT here — "ya tengo un recordatorio" must NOT trigger the flow
 
 // Phone normalization centralizada en utils/phone.ts (LESSONS #40).
-import { toMetaSendablePhone as toSendablePhone } from '../utils/phone';
+import { toMetaSendablePhone as toSendablePhone, canonicalPhone, canonicalDni } from '../utils/phone';
 
 // BUG 1: el bot quedaba mudo ante mensajes que no son texto (audio, imagen,
 // sticker, ubicación, documento). Respondemos UNA vez con esta guía cálida y
@@ -261,8 +261,10 @@ export async function handleIncomingMessage(
     return;
   }
 
-  // For DB storage, use E.164 with +
-  const e164Phone = `+${normalizedPhone}`;
+  // Para almacenar: forma canónica (+549... para móviles AR). Así el teléfono que
+  // guarda el bot coincide string-a-string con el que cargan panel/CSV → el @unique
+  // impide duplicar el mismo número en formatos distintos (con/sin el 9).
+  const e164Phone = canonicalPhone(normalizedPhone);
 
   // BUG 1: contenido NO-texto (audio/imagen/sticker/ubicación/documento). El
   // dedup ya ocurrió en el webhook (Twilio/Meta), así que respondemos UNA sola
@@ -884,7 +886,7 @@ async function handleRegistration(
 
   // Step 3: Received DNI — UPSERT patient, link phone
   if (state.step === 'AWAITING_DNI') {
-    const dni = text.trim().replace(/\./g, '');
+    const dni = canonicalDni(text); // solo dígitos (saca puntos/espacios) — forma canónica
 
     if (!DNI_REGEX.test(dni)) {
       const retry = 'El DNI debe tener 6 a 8 dígitos. Por favor, ingresá tu DNI nuevamente:';

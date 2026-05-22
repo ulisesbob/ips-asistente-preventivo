@@ -74,6 +74,7 @@ Menú inicial de 3 opciones para números nuevos (1 consulta · 2 inscribirme en
 | Cifrado en reposo PII | AES-GCM sobre mensajes y notas clínicas + backfill |
 | Audit log + consentimiento | Trazabilidad ley 25.326 |
 | Soft-delete pacientes | Baja lógica + reactivación por DNI |
+| Anti-duplicados DNI/teléfono | `@unique` en `dni` y `phone` + normalización canónica en TODAS las vías (bot/panel/CSV): DNI a solo dígitos, teléfono a E.164 con el "9" de móvil AR (`+549...`). Mismo número/DNI en cualquier formato → mismo string → no se puede duplicar. Script `check-phone-dupes.ts` para normalizar/detectar colisiones en data vieja. |
 | Seguimiento "sin programa" | Followup automático (cron) + alertas admin en el dashboard para pacientes registrados por bot que nadie inscribió |
 | Observabilidad (Sentry) | Captura de errores 5xx + fallback AI Sonnet→Haiku, sin PII |
 | **Medicación ampliada** | Duración del tratamiento (continuo / por X días, auto-apagado al vencer), instrucciones del médico (el bot las reenvía literal), campo de efectos secundarios (lo carga el médico; la IA nunca los genera) |
