@@ -368,8 +368,12 @@ describe('Aislamiento del chat anónimo (security C-1)', () => {
     await handle(PHONE, '1', 'Nuevo', false); // consulta
     await handle(PHONE, '¿qué centros hay en Posadas?', 'Nuevo', false); // chat general
 
-    // Toda búsqueda de conversación del flujo anónimo filtra por patientId: null.
-    const findCalls = mockPrisma.conversation.findFirst.mock.calls;
+    // Toda búsqueda de conversación del flujo anónimo (getOrCreateConversation)
+    // filtra por patientId: null. Excluimos el check de pausa del modo híbrido,
+    // que busca por teléfono+estado (no por paciente) y lleva botPausedUntil.
+    const findCalls = mockPrisma.conversation.findFirst.mock.calls.filter(
+      (c) => !('botPausedUntil' in (c[0]?.where ?? {}))
+    );
     expect(findCalls.length).toBeGreaterThan(0);
     for (const call of findCalls) {
       expect(call[0].where).toEqual(expect.objectContaining({ patientId: null }));

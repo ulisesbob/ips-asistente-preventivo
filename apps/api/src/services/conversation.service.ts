@@ -45,6 +45,10 @@ const MAX_HISTORY_FOR_DB = 20; // Align with AI service MAX_HISTORY_MESSAGES
 // If an ESCALATED conversation has no operator activity in this window, auto-reopen
 // so the patient isn't stuck waiting forever (audit #16).
 const ESCALATION_STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
+// Modo híbrido: cuando un operador escribe desde el panel en una conversación OPEN,
+// el bot se calla por esta ventana (auto-expira para no quedar mudo si el operador
+// se olvida de devolver el control). Se puede acortar con resumeBot.
+const BOT_PAUSE_MS = 30 * 60 * 1000; // 30 minutes
 
 // Escalation keywords — patient wants to talk to a human (pre-normalized, no accents)
 const ESCALATION_KEYWORDS = [
@@ -266,6 +270,31 @@ export async function handleIncomingMessage(
   // impide duplicar el mismo número en formatos distintos (con/sin el 9).
   const e164Phone = canonicalPhone(normalizedPhone);
 
+  // ─── Modo híbrido: bot en pausa (operador atendiendo) ───────────────────────
+  // Va PRIMERO, antes de TODO (unsupported, BAJA/ALTA, encuesta, escalación, IA):
+  // si hay una conversación OPEN de este número con la pausa vigente, el bot no
+  // hace NADA — solo guarda el mensaje del paciente para que el operador lo lea.
+  // Así un "BAJA", un "sí" (encuesta) o un audio que el paciente le manda a la
+  // PERSONA no dispara ninguna respuesta automática. La pausa auto-expira.
+  const pausedConv = await prisma.conversation.findFirst({
+    where: {
+      phone: e164Phone,
+      status: ConversationStatus.OPEN,
+      botPausedUntil: { gt: new Date() },
+    },
+    select: { id: true },
+  });
+  if (pausedConv) {
+    await prisma.message.create({
+      data: {
+        conversationId: pausedConv.id,
+        role: MessageRole.USER,
+        content: isUnsupported ? '[mensaje no-texto]' : text,
+      },
+    });
+    return;
+  }
+
   // BUG 1: contenido NO-texto (audio/imagen/sticker/ubicación/documento). El
   // dedup ya ocurrió en el webhook (Twilio/Meta), así que respondemos UNA sola
   // vez con la guía y cortamos: no IA, no registro, no flujos.
@@ -358,7 +387,9 @@ export async function handleIncomingMessage(
       if (isStale) {
         await prisma.conversation.update({
           where: { id: activeConv.id },
-          data: { status: ConversationStatus.OPEN },
+          // Limpiamos cualquier pausa híbrida vieja al reabrir para que el bot
+          // retome de verdad (no quede mudo por un botPausedUntil residual).
+          data: { status: ConversationStatus.OPEN, botPausedUntil: null },
         });
         console.log(
           `[Escalation] Auto-reopened stale ESCALATED conv ${activeConv.id} (patient ${maskId(patient.id)})`
@@ -1365,7 +1396,9 @@ async function handleEscalation(
   // Mark conversation as ESCALATED
   await prisma.conversation.update({
     where: { id: conversation.id },
-    data: { status: ConversationStatus.ESCALATED },
+    // Al escalar, limpiamos la pausa híbrida: ESCALATED ya silencia al bot por
+    // status; dejar un botPausedUntil residual confundiría un futuro auto-reopen.
+    data: { status: ConversationStatus.ESCALATED, botPausedUntil: null },
   });
 
   const message =
@@ -1456,8 +1489,12 @@ export async function sendOperatorReply(
 ): Promise<void> {
   const conversation = await verifyConversationAccess(conversationId, doctorId, role);
 
-  if (conversation.status !== ConversationStatus.ESCALATED) {
-    throw new ValidationError('Solo se puede responder a conversaciones escaladas');
+  // Modo híbrido: el operador puede escribir en OPEN (bot activo) y en ESCALATED.
+  // Solo CLOSED se rechaza (conversación ya terminada). Decisión de producto: se
+  // permite responder aunque el paciente haya dado BAJA — es atención humana en
+  // una conversación en curso (el BOT sí queda mudo tras BAJA).
+  if (conversation.status === ConversationStatus.CLOSED) {
+    throw new ValidationError('No se puede responder a una conversación cerrada');
   }
 
   // Save message as SYSTEM (from operator) and send via WhatsApp
@@ -1469,8 +1506,38 @@ export async function sendOperatorReply(
     },
   });
 
+  // Si el bot estaba atendiendo (OPEN), lo pausamos para no pisar al humano. La
+  // pausa auto-expira (BOT_PAUSE_MS); cada respuesta del operador la renueva.
+  if (conversation.status === ConversationStatus.OPEN) {
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { botPausedUntil: new Date(Date.now() + BOT_PAUSE_MS) },
+    });
+  }
+
   // sendTextMessage already normalizes internally via normalizePhoneForSend
   await sendTextMessage(conversation.phone, replyText);
+}
+
+// ─── Resume bot (devolver la conversación al bot) ────────────────────────────
+// El operador termina su intervención y le devuelve el control al bot antes de que
+// expire la pausa. No avisa al paciente: el bot simplemente retoma en el próximo
+// mensaje (evita un mensaje de sistema innecesario al adulto mayor).
+
+export async function resumeBot(
+  conversationId: string,
+  doctorId: string,
+  role: Role
+): Promise<void> {
+  const conversation = await verifyConversationAccess(conversationId, doctorId, role); // IDOR
+  // Solo tiene sentido en OPEN (ESCALATED ya silencia por status; CLOSED terminó).
+  if (conversation.status !== ConversationStatus.OPEN) {
+    throw new ValidationError('Solo se puede devolver el bot en conversaciones abiertas');
+  }
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { botPausedUntil: null },
+  });
 }
 
 // ─── Close escalated conversation ────────────────────────────────────────────

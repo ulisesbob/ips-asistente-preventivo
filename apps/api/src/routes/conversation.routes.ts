@@ -5,7 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error-handler';
 import { Role, ConversationStatus } from '@ips/db';
 import * as conversationPanelService from '../services/conversation-panel.service';
-import { sendOperatorReply, closeEscalatedConversation } from '../services/conversation.service';
+import { sendOperatorReply, closeEscalatedConversation, resumeBot } from '../services/conversation.service';
 
 const router = Router();
 
@@ -111,6 +111,22 @@ router.post(
     const { id } = req.params as z.infer<typeof idParamsSchema>;
 
     await closeEscalatedConversation(id, req.doctor!.id, req.doctor!.role as Role);
+
+    res.status(200).json({ status: 'ok' });
+  })
+);
+
+// ─── POST /api/conversations/:id/resume — Devolver la conversación al bot ────
+// Modo híbrido: el operador termina su intervención y el bot retoma.
+
+router.post(
+  '/:id/resume',
+  requireAuth,
+  validate(idParamsSchema, 'params'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params as z.infer<typeof idParamsSchema>;
+
+    await resumeBot(id, req.doctor!.id, req.doctor!.role as Role);
 
     res.status(200).json({ status: 'ok' });
   })

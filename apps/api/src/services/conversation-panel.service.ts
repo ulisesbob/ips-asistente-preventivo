@@ -109,6 +109,7 @@ export async function getConversationMessages(
       id: true,
       phone: true,
       status: true,
+      botPausedUntil: true,
       startedAt: true,
       patient: {
         select: {
@@ -180,6 +181,7 @@ export async function getConversationMessages(
       id: conversation.id,
       phone: conversation.phone,
       status: conversation.status,
+      botPausedUntil: conversation.botPausedUntil,
       startedAt: conversation.startedAt,
       patientName: conversation.patient?.fullName ?? null,
     },
